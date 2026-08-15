@@ -106,6 +106,12 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--dir", default=str(Path(__file__).parent / "hub_files"))
     parser.add_argument("--code", default="local-test", help='required code; "" accepts any')
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="bind address. Keep 127.0.0.1 unless you are exposing it deliberately "
+        "(cloudflared works with the default, since it connects locally).",
+    )
     args = parser.parse_args()
 
     directory = Path(args.dir).resolve()
@@ -123,7 +129,12 @@ def main() -> int:
     print(f"  INSTALLATION_CODE={args.code or '(anything)'}")
     print("\nCtrl+C to stop.")
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    if args.host != "127.0.0.1":
+        print(f"\nWARNING: binding to {args.host} - this server is reachable beyond this machine.")
+        if not args.code:
+            print("WARNING: --code is empty, so anyone who reaches it can download the JARs.")
+
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
