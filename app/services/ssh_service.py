@@ -138,6 +138,11 @@ class SSHService:
             try:
                 client.connect(host, **kwargs)
                 self._client = client
+                transport = client.get_transport()
+                if transport is not None:
+                    # Long SFTP transfers look idle to some firewalls between
+                    # the VDI and the server; keepalives stop them being cut.
+                    transport.set_keepalive(30)
                 logger.info("SSH connected to %s", host)
                 return
             except paramiko.AuthenticationException as exc:
@@ -294,15 +299,66 @@ class SSHService:
 
     # -- SFTP ---------------------------------------------------------------
 
-    async def sftp(self) -> paramiko.SFTPClient:
+    async def ensure_sftp(self) -> paramiko.SFTPClient:
+        """Return an SFTP client that is actually usable.
+
+        Never assume a cached session is alive. An SFTP channel can die while
+        the transport survives - exec_command opens a fresh channel per call,
+        so shell commands keep working and hide the dead channel until the next
+        transfer fails with "Socket is closed".
+        """
         if self.offline:
             raise SSHError("SFTP is unavailable in offline dry-run mode")
+
         if not self.connected:
-            raise SSHError("Not connected to the app server")
+            logger.info("SSH transport is not active - reconnecting")
+            await self.close()
+            await self.connect()
+
+        if self._sftp is not None:
+            usable = await asyncio.to_thread(self._sftp_usable, self._sftp)
+            if not usable:
+                logger.info("SFTP channel is stale - discarding it")
+                await asyncio.to_thread(self._close_sftp_quietly)
+
         if self._sftp is None:
-            assert self._client is not None
+            if self._client is None:
+                raise SSHError("Not connected to the app server")
             self._sftp = await asyncio.to_thread(self._client.open_sftp)
         return self._sftp
+
+    # Kept as the historic name; always goes through the liveness check.
+    async def sftp(self) -> paramiko.SFTPClient:
+        return await self.ensure_sftp()
+
+    @staticmethod
+    def _sftp_usable(sftp: paramiko.SFTPClient) -> bool:
+        try:
+            channel = sftp.get_channel()
+            if channel is None or channel.closed:
+                return False
+            sftp.stat(".")  # a cheap round-trip proves the socket still works
+            return True
+        except Exception:
+            return False
+
+    def _close_sftp_quietly(self) -> None:
+        if self._sftp is not None:
+            try:
+                self._sftp.close()
+            except Exception:
+                pass
+            self._sftp = None
+
+    async def close_sftp(self) -> None:
+        """Close the SFTP session without dropping the SSH transport."""
+        await asyncio.to_thread(self._close_sftp_quietly)
+
+    async def reset_connection(self) -> str:
+        """Tear down transport and SFTP, then dial again from scratch."""
+        logger.info("Resetting the SSH connection")
+        await self.close()
+        return await self.connect()
 
     # -- log streaming ------------------------------------------------------
 

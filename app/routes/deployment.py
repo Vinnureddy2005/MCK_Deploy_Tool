@@ -144,13 +144,13 @@ async def backup(payload: BackupRequest) -> dict:
 
 @router.post("/deployment/upload")
 async def upload(payload: ServiceRequest) -> dict:
-    """Upload the JAR downloaded by /deployment/download."""
+    """Stage 4: upload the downloaded JAR into CopyData/<date>/ (WinSCP step)."""
     try:
         jar = jar_filename(payload.service_key, payload.version)
         local = deployment_service.downloader.target_path(jar)
         if not settings.dry_run and not local.exists():
             raise ValidationError(f"{jar} has not been downloaded yet - run download first")
-        result = await deployment_service.sftp.upload_jar(local, jar)
+        result = await deployment_service.sftp.upload_to_copydata(local, jar)
     except Exception as exc:
         raise _handle(exc) from exc
     return {
@@ -158,8 +158,19 @@ async def upload(payload: ServiceRequest) -> dict:
         "staged_path": result.staged_path,
         "remote_path": result.remote_path,
         "size_bytes": result.size_bytes,
+        "attempts": result.attempts,
         "simulated": result.simulated,
     }
+
+
+@router.post("/deployment/copy-to-binaries")
+async def copy_to_binaries(payload: ServiceRequest) -> dict:
+    """Stage 8: copy the staged JAR from CopyData into the binaries directory."""
+    try:
+        jar = jar_filename(payload.service_key, payload.version)
+        return await deployment_service.sftp.copy_to_binaries(jar)
+    except Exception as exc:
+        raise _handle(exc) from exc
 
 
 @router.post("/deployment/update-checksum")

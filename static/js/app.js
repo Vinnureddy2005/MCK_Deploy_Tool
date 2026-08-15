@@ -5,13 +5,14 @@ const STAGE_LABELS = {
   validate: 'Validate',
   download: 'Download',
   connect: 'Connect',
+  upload_to_copydata: 'Upload to CopyData',
   backup: 'Backup',
-  upload: 'Upload',
-  update_checksum: 'Update checksum',
-  daemon_reload: 'Daemon reload',
+  update_checksum: 'Update Checksum',
+  daemon_reload: 'Daemon Reload',
+  copy_to_binaries: 'Copy to Binaries',
   restart: 'Restart',
-  health_check: 'Health check',
-  live_logs: 'Live logs',
+  health_check: 'Health Check',
+  live_logs: 'Live Logs',
 };
 
 const STAGE_ICONS = {

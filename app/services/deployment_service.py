@@ -19,6 +19,7 @@ from app.config import (
     Settings,
     ValidationError,
     binaries_path,
+    copydata_dir,
     get_service,
     jar_filename,
     settings as default_settings,
@@ -43,14 +44,19 @@ from app.services.ssh_service import CommandFailed, SSHError, SSHService
 
 logger = logging.getLogger(__name__)
 
+# Mirrors the manual procedure exactly:
+#   download -> WinSCP into CopyData/<date>/ -> PuTTY: back up, edit checksum,
+#   daemon-reload, cp into binaries, restart, check, tail logs.
+# The JAR is staged and verified BEFORE anything on the server is modified.
 STAGES = [
     "validate",
     "download",
     "connect",
+    "upload_to_copydata",
     "backup",
-    "upload",
     "update_checksum",
     "daemon_reload",
+    "copy_to_binaries",
     "restart",
     "health_check",
     "live_logs",
@@ -87,6 +93,8 @@ class DeploymentState:
     error: str = ""
     error_stage: str = ""
     backup_dir: str = ""
+    staged_path: str = ""
+    uploaded_size: int = 0
     port_conflict: dict[str, Any] | None = None
     stages: dict[str, dict[str, str]] = field(
         default_factory=lambda: {s: {"status": WAITING, "message": ""} for s in STAGES}
@@ -111,6 +119,8 @@ class DeploymentState:
             "error": self.error,
             "error_stage": self.error_stage,
             "backup_dir": self.backup_dir,
+            "staged_path": self.staged_path,
+            "uploaded_size": self.uploaded_size,
             "port_conflict": self.port_conflict,
             "stages": self.stages,
             "stage_order": STAGES,
@@ -414,10 +424,12 @@ class DeploymentService:
             await self._stage_validate(service_key, checksum, version)
             await self._stage_download(service_key, version)
             await self._stage_connect()
+            # Stage the JAR first: if this fails, the server is untouched.
+            await self._stage_upload_to_copydata()
             await self._stage_backup(overwrite_backup)
-            await self._stage_upload()
             await self._stage_update_checksum(service_key)
             await self._stage_daemon_reload()
+            await self._stage_copy_to_binaries()
             await self._stage_restart(service_key)
             await self._stage_health_check(service_key)
             await self._stage_live_logs(service_key)
@@ -526,22 +538,54 @@ class DeploymentService:
             await self._log(note, level="warn")
         await self._set_stage("backup", COMPLETED, result.directory)
 
-    async def _stage_upload(self) -> None:
-        await self._set_stage("upload", RUNNING, f"Uploading {self.state.jar}")
+    async def _stage_upload_to_copydata(self) -> None:
+        """Stage 4 - the WinSCP equivalent. Nothing on the server is modified yet."""
+        staging = copydata_dir()
+        await self._set_stage("upload_to_copydata", RUNNING, f"Uploading {self.state.jar} to {staging}")
         if self.settings.dry_run:
-            await self._log(f"Would upload {self.state.jar} to {binaries_path(self.state.jar)}")
-            await self._set_stage("upload", COMPLETED, "simulated")
+            await self._log(f"Would upload {self.state.jar} to {staging}/{self.state.jar}")
+            await self._set_stage("upload_to_copydata", COMPLETED, "simulated")
             return
         if self._local_jar is None or not self._local_jar.exists():
-            raise DeploymentError("upload", "Downloaded JAR is missing from the temp directory")
+            raise DeploymentError("upload_to_copydata", "Downloaded JAR is missing from the temp directory")
         try:
-            result = await self.sftp.upload_jar(
+            result = await self.sftp.upload_to_copydata(
                 self._local_jar, self.state.jar, progress=lambda m: self.broadcaster.log(m)
             )
         except UploadError as exc:
-            raise DeploymentError("upload", str(exc)) from exc
-        await self._log(f"Uploaded {result.filename} -> {result.remote_path}")
-        await self._set_stage("upload", COMPLETED, result.remote_path)
+            raise DeploymentError(
+                "upload_to_copydata",
+                str(exc),
+                "Nothing on the server was modified - the JAR never left the staging directory.",
+            ) from exc
+
+        self.state.staged_path = result.staged_path
+        self.state.uploaded_size = result.size_bytes
+        if result.attempts > 1:
+            await self._log(f"Upload succeeded on attempt {result.attempts} after reconnecting", level="warn")
+        await self._log(f"Uploaded {result.filename} -> {result.staged_path}")
+        await self._log(f"Verified {result.size_bytes} bytes on the server")
+        await self._set_stage("upload_to_copydata", COMPLETED, result.staged_path)
+
+    async def _stage_copy_to_binaries(self) -> None:
+        """Stage 8 - the PuTTY `cp` from CopyData into the binaries directory."""
+        destination = binaries_path(self.state.jar)
+        await self._set_stage("copy_to_binaries", RUNNING, f"Copying {self.state.jar} to {destination}")
+        if self.settings.dry_run:
+            await self._log(f"Would copy {copydata_dir()}/{self.state.jar} -> {destination}")
+            await self._set_stage("copy_to_binaries", COMPLETED, "simulated")
+            return
+        try:
+            result = await self.sftp.copy_to_binaries(self.state.jar, self.state.uploaded_size or None)
+        except UploadError as exc:
+            raise DeploymentError(
+                "copy_to_binaries",
+                str(exc),
+                f"Restore from the backup in {self.state.backup_dir} if the binary is now inconsistent.",
+            ) from exc
+        await self._log(f"Copied {result['source']} -> {result['destination']}")
+        await self._log(f"Verified {result['size']} bytes in the binaries directory")
+        await self._set_stage("copy_to_binaries", COMPLETED, result["destination"])
 
     async def _stage_update_checksum(self, service_key: str) -> None:
         await self._set_stage("update_checksum", RUNNING, f"Updating APP_CHECKSUM in {self.state.unit}")
