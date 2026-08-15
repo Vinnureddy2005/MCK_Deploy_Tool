@@ -277,6 +277,12 @@ class SSHService:
         plain = await self.run(["cat", path], check=False)
         if plain.ok and plain.stdout:
             return plain.stdout
+        # A missing file must not be reported as a sudo problem.
+        if "no such file" in (plain.stderr or "").lower():
+            raise SSHError(
+                f"{path} does not exist on the server. "
+                "This service may not be installed here - check the unit name."
+            )
         result = await self.run(["cat", path], sudo=True)
         return result.stdout
 
