@@ -2,6 +2,9 @@ __pycache__/
 *.pyc
 .env
 temp/
+# JARs served by the stand-in hub - never commit build artifacts
+tools/hub_files/
+*.jar
 venv/
 .venv/
 .pytest_cache/
