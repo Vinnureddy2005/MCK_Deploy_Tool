@@ -109,6 +109,27 @@ async def test_checksum_stage_writes_and_verifies(live_settings):
     assert "aiDAPApp.service" not in " ".join(ssh.commands)
 
 
+async def test_unit_file_is_read_without_sudo_when_possible(live_settings):
+    """Unit files are world-readable; demanding sudo breaks read-only lookups."""
+    ssh = FakeSSH(live_settings, existing={"/etc/systemd/system/aiTXIntegrationAgent.service"})
+    service = build(live_settings, ssh)
+
+    result = await service.get_current_checksum("tx-integration-agent")
+
+    assert result["found"] is True
+    assert result["checksum"] == "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990"
+
+
+async def test_current_checksum_is_read_only(live_settings):
+    ssh = FakeSSH(live_settings)
+    service = build(live_settings, ssh)
+
+    await service.get_current_checksum("tx-integration-agent")
+
+    for command in ssh.commands:
+        assert not any(w in command for w in ("cp ", "tee ", "restart", "kill", "mkdir")), command
+
+
 async def test_checksum_stage_refuses_an_unexpected_unit_file(live_settings):
     ssh = FakeSSH(
         live_settings,

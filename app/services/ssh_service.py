@@ -249,12 +249,34 @@ class SSHService:
     # -- convenience readers (all read-only) --------------------------------
 
     async def file_exists(self, path: str) -> bool:
-        result = await self.run(["test", "-e", path], sudo=True, check=False)
-        if result.simulated:
+        """Try without sudo first.
+
+        Important: a sudo failure here must not be mistaken for "file absent" -
+        that would make a backup silently report nothing to back up. So the
+        unprivileged answer wins when it succeeds, and sudo is only a fallback.
+        """
+        plain = await self.run(["test", "-e", path], check=False)
+        if plain.simulated:
             return False
+        if plain.ok:
+            return True
+        result = await self.run(["test", "-e", path], sudo=True, check=False)
+        if not result.ok and result.stderr and "password" in result.stderr.lower():
+            raise SSHError(
+                f"Cannot determine whether {path} exists: sudo is not available. "
+                "Set SUDO_PASSWORD in .env or grant NOPASSWD sudo."
+            )
         return result.ok
 
     async def read_file(self, path: str) -> str:
+        """Read a remote file, without sudo when possible.
+
+        Unit files under /etc/systemd/system are world-readable, so this works
+        even when sudo needs a password we do not have.
+        """
+        plain = await self.run(["cat", path], check=False)
+        if plain.ok and plain.stdout:
+            return plain.stdout
         result = await self.run(["cat", path], sudo=True)
         return result.stdout
 
