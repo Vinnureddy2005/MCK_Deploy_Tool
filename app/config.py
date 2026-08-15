@@ -38,11 +38,16 @@ class ValidationError(ValueError):
 #                       <jar_prefix>-<version>.jar locally and on the server
 #   systemd_service  -> unit file in /etc/systemd/system
 #   default_port     -> used for the lsof port-conflict check
+#   log_file         -> the application's own log, tailed live alongside
+#                       journalctl. These services log to a file rather than
+#                       to stdout, so journald only shows systemd events.
+#                       Empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
 # ---------------------------------------------------------------------------
 SERVICES: dict[str, dict[str, Any]] = {
     "tx-test-mgmt": {
         "display_name": "TX Test Management",
         "hub_filename": "",  # empty -> use the JAR filename
+        "log_file": "",  # empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
         "jar_prefix": "tx-test-mgmt",
         "systemd_service": "aiTXTTestMgmt.service",
         "default_version": "1.6.0",
@@ -51,6 +56,7 @@ SERVICES: dict[str, dict[str, Any]] = {
     "ai-dap-app": {
         "display_name": "AI DAP App",
         "hub_filename": "",  # empty -> use the JAR filename
+        "log_file": "",  # empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
         "jar_prefix": "ai-dap-app",
         "systemd_service": "aiDAPApp.service",
         "default_version": "1.6.0",
@@ -59,6 +65,7 @@ SERVICES: dict[str, dict[str, Any]] = {
     "tx-integration-agent": {
         "display_name": "TX Integration Agent",
         "hub_filename": "",  # empty -> use the JAR filename
+        "log_file": "",  # empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
         "jar_prefix": "tx-integration-agent",
         "systemd_service": "aiTXIntegrationAgent.service",
         "default_version": "1.6.0",
@@ -380,3 +387,27 @@ def binaries_path(filename: str) -> str:
 
 def systemd_path(unit: str) -> str:
     return remote_path(settings.remote_systemd_dir, validate_unit_name(unit))
+
+
+_LOG_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+
+
+def service_log_file(service_key: str) -> str:
+    """Absolute path of the application's own log file.
+
+    These services write to a file rather than stdout, so journald shows only
+    systemd events. Defaults to <REMOTE_WEBDAV_DIR>/<jar_prefix>.log, which is
+    the convention the unit files use.
+    """
+    cfg = get_service(service_key)
+    path = (cfg.get("log_file") or "").strip()
+    if not path:
+        path = f"{settings.remote_webdav_dir.rstrip('/')}/{cfg['jar_prefix']}.log"
+    return validate_log_path(path)
+
+
+def validate_log_path(path: str) -> str:
+    path = (path or "").strip()
+    if not _LOG_PATH_RE.match(path) or ".." in path:
+        raise ValidationError(f"Invalid log file path: {path!r}")
+    return path

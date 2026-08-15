@@ -67,26 +67,31 @@ class Broadcaster:
 
 
 class LogStreamer:
-    """Streams journalctl output for exactly one unit at a time."""
+    """Streams both log sources for one service at a time.
+
+    Two are needed: journalctl carries systemd lifecycle events, while the
+    application itself writes to a file (its unit does
+    `ExecStartPre=... rm -f /var/www/webdav/<service>.log`), so startup errors
+    and stack traces never reach journald.
+    """
 
     def __init__(self, ssh: SSHService, broadcaster: Broadcaster, settings: Settings | None = None):
         self.ssh = ssh
         self.broadcaster = broadcaster
         self.settings = settings or default_settings
-        self._thread: threading.Thread | None = None
-        self._channel = None
+        self._streams: list[tuple[threading.Thread, Any]] = []
         self._stop = threading.Event()
         self._unit: str | None = None
 
     @property
     def active(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        return any(thread.is_alive() for thread, _ in self._streams)
 
     @property
     def unit(self) -> str | None:
         return self._unit
 
-    async def start(self, unit_name: str) -> None:
+    async def start(self, unit_name: str, log_path: str | None = None) -> None:
         unit_name = validate_unit_name(unit_name)
         await self.stop()
 
@@ -98,24 +103,46 @@ class LogStreamer:
             )
             return
 
-        argv = ["journalctl", "-u", unit_name, "-n", str(self.settings.log_tail_lines), "-f", "--no-pager"]
+        self._stop.clear()
+        self._unit = unit_name
+        loop = asyncio.get_running_loop()
+        tail = str(self.settings.log_tail_lines)
+
+        started = await self._spawn(
+            ["journalctl", "-u", unit_name, "-n", tail, "-f", "--no-pager"],
+            source="journal",
+            loop=loop,
+            label=f"journalctl -u {unit_name}",
+        )
+        if started:
+            await self.broadcaster.log(f"Streaming journalctl -u {unit_name} -f  (systemd)")
+
+        if log_path:
+            # -F, not -f: the unit deletes and recreates this file on every
+            # restart, and -f would stop following the moment that happens.
+            started = await self._spawn(
+                ["tail", "-n", tail, "-F", log_path],
+                source="applog",
+                loop=loop,
+                label=f"tail -F {log_path}",
+            )
+            if started:
+                await self.broadcaster.log(f"Streaming {log_path}  (application)")
+
+    async def _spawn(self, argv: list[str], *, source: str, loop, label: str) -> bool:
         try:
             channel = self.ssh.open_log_channel(argv)
         except SSHError as exc:
-            await self.broadcaster.log(f"Could not start live logs: {exc}", level="error")
-            return
-
-        self._channel = channel
-        self._unit = unit_name
-        self._stop.clear()
-        loop = asyncio.get_running_loop()
-        self._thread = threading.Thread(
-            target=self._pump, args=(channel, loop, unit_name), name=f"journal-{unit_name}", daemon=True
+            await self.broadcaster.log(f"Could not start {label}: {exc}", level="error")
+            return False
+        thread = threading.Thread(
+            target=self._pump, args=(channel, loop, source, label), name=f"log-{source}", daemon=True
         )
-        self._thread.start()
-        await self.broadcaster.log(f"Streaming journalctl -u {unit_name} -f")
+        thread.start()
+        self._streams.append((thread, channel))
+        return True
 
-    def _pump(self, channel, loop: asyncio.AbstractEventLoop, unit_name: str) -> None:
+    def _pump(self, channel, loop: asyncio.AbstractEventLoop, source: str, label: str) -> None:
         buffer = ""
         try:
             while not self._stop.is_set():
@@ -126,21 +153,21 @@ class LogStreamer:
                     buffer += data
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
-                        self._emit(loop, line.rstrip("\r"))
+                        self._emit(loop, source, line.rstrip("\r"))
                 elif channel.exit_status_ready():
                     break
                 else:
                     self._stop.wait(0.2)
         except Exception as exc:  # noqa: BLE001 - background thread must not die silently
-            logger.warning("Log stream for %s ended: %s", unit_name, exc)
-            self._emit(loop, f"[log stream ended: {exc}]")
+            logger.warning("Log stream %s ended: %s", label, exc)
+            self._emit(loop, source, f"[{label} ended: {exc}]")
         finally:
             try:
                 channel.close()
             except Exception:
                 pass
 
-    def _emit(self, loop: asyncio.AbstractEventLoop, line: str) -> None:
+    def _emit(self, loop: asyncio.AbstractEventLoop, source: str, line: str) -> None:
         if not line.strip():
             return
         if "[sudo] password" in line:
@@ -151,20 +178,19 @@ class LogStreamer:
             if secret and secret in line:
                 return
         asyncio.run_coroutine_threadsafe(
-            self.broadcaster.publish({"type": "journal", "message": line}), loop
+            self.broadcaster.publish({"type": source, "message": line}), loop
         )
 
     async def stop(self) -> None:
         self._stop.set()
-        if self._channel is not None:
+        for thread, channel in self._streams:
             try:
-                self._channel.close()
+                channel.close()
             except Exception:
                 pass
-            self._channel = None
-        if self._thread is not None:
-            await asyncio.to_thread(self._thread.join, 2.0)
-            self._thread = None
+        for thread, _ in self._streams:
+            await asyncio.to_thread(thread.join, 2.0)
+        self._streams = []
         self._unit = None
 
     async def recent(self, unit_name: str, lines: int | None = None) -> str:

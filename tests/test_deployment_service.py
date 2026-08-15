@@ -120,6 +120,43 @@ async def test_unit_file_is_read_without_sudo_when_possible(live_settings):
     assert result["checksum"] == "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990"
 
 
+def test_app_log_path_defaults_to_the_webdav_convention(dry_settings):
+    from app.config import service_log_file
+
+    assert service_log_file("tx-integration-agent") == "/var/www/webdav/tx-integration-agent.log"
+    assert service_log_file("tx-test-mgmt") == "/var/www/webdav/tx-test-mgmt.log"
+
+
+def test_app_log_path_can_be_overridden(dry_settings, monkeypatch):
+    from app import config
+
+    monkeypatch.setitem(config.SERVICES["tx-test-mgmt"], "log_file", "/var/log/tx/app.log")
+    assert config.service_log_file("tx-test-mgmt") == "/var/log/tx/app.log"
+
+
+@pytest.mark.parametrize("bad", ["../../etc/passwd", "relative.log", "/var/log/../../etc/shadow", ""])
+def test_app_log_path_rejects_traversal(dry_settings, monkeypatch, bad):
+    from app import config
+
+    monkeypatch.setitem(config.SERVICES["tx-test-mgmt"], "log_file", bad)
+    if bad == "":
+        # empty falls back to the default rather than failing
+        assert config.service_log_file("tx-test-mgmt").endswith("tx-test-mgmt.log")
+    else:
+        with pytest.raises(ValidationError):
+            config.service_log_file("tx-test-mgmt")
+
+
+async def test_app_log_tail_is_read_only(live_settings):
+    ssh = FakeSSH(live_settings, responses={"tail": CommandResult("", 0, "boot ok\n", "")})
+    service = build(live_settings, ssh)
+
+    out = await service.recent_app_log("tx-integration-agent", 20)
+
+    assert out == "boot ok\n"
+    assert ssh.commands == ["sudo tail -n 20 /var/www/webdav/tx-integration-agent.log"]
+
+
 async def test_current_checksum_is_read_only(live_settings):
     ssh = FakeSSH(live_settings)
     service = build(live_settings, ssh)

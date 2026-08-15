@@ -299,6 +299,10 @@ function handleEvent(event) {
       appendLog(event.message, 'journal', event.time);
       break;
 
+    case 'applog':
+      appendLog(event.message, 'applog', event.time);
+      break;
+
     case 'stage':
       renderPipeline(event.state);
       if (event.status === 'running') {

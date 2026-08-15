@@ -22,6 +22,7 @@ from app.config import (
     copydata_dir,
     get_service,
     jar_filename,
+    service_log_file,
     settings as default_settings,
     systemd_path,
     validate_checksum,
@@ -373,7 +374,15 @@ class DeploymentService:
 
     async def stream_logs(self, service_key: str) -> None:
         cfg = get_service(service_key)
-        await self.streamer.start(cfg["systemd_service"])
+        await self.streamer.start(cfg["systemd_service"], service_log_file(service_key))
+
+    async def recent_app_log(self, service_key: str, lines: int = 60) -> str:
+        """One-shot tail of the application's own log file. Read-only."""
+        path = service_log_file(service_key)
+        result = await self.ssh.run(["tail", "-n", str(lines), path], sudo=True, check=False)
+        if not result.ok:
+            return ""
+        return result.stdout
 
     async def check_webdav(self) -> str:
         entries = await self.ssh.list_dir(self.settings.remote_webdav_dir)
@@ -658,6 +667,13 @@ class DeploymentService:
             tail = await self.streamer.recent(self.state.unit, 60)
             for line in tail.splitlines()[-40:]:
                 await self.broadcaster.publish({"type": "journal", "message": line})
+            # The application logs to a file, so the actual reason it refused to
+            # start (checksum rejection, port bind failure) is only in there.
+            app_tail = await self.recent_app_log(service_key, 60)
+            if app_tail.strip():
+                await self._log(f"Last lines of {service_log_file(service_key)}:", level="error")
+                for line in app_tail.splitlines()[-40:]:
+                    await self.broadcaster.publish({"type": "applog", "message": line})
             await self._diagnose_port_conflict()
             raise DeploymentError(
                 "health_check",

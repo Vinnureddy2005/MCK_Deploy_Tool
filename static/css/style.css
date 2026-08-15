@@ -181,7 +181,8 @@ textarea.control { resize: vertical; word-break: break-all; }
 .log-success { color: var(--ok); font-weight: 600; }
 .log-warn    { color: var(--warn); }
 .log-error   { color: var(--err); font-weight: 600; }
-.log-journal { color: #7fb3e8; }
+.log-journal { color: #7fb3e8; }   /* systemd / journalctl */
+.log-applog  { color: #8fd6a8; }   /* the application's own log file */
 .log-stage   { color: #b48ce8; }
 
 /* ---------------------------------------------------------------- modal */

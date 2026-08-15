@@ -374,6 +374,9 @@ class SSHService:
         # No PTY here on purpose. A PTY echoes everything written to it, so the
         # sudo password would come back as journal output and be shown in the
         # browser. `sudo -S` reads it from stdin instead, which is not echoed.
+        # stderr is merged so `tail -F` messages ("has appeared; following new
+        # file") reach the user instead of vanishing.
+        channel.set_combine_stderr(True)
         channel.exec_command(self._build([str(a) for a in argv], sudo))
         if sudo and self.settings.use_sudo and self.settings.sudo_password:
             channel.sendall(self.settings.sudo_password + "\n")
