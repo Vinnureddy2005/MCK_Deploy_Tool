@@ -33,7 +33,6 @@ class DownloadResult:
     size_bytes: int
     sha256: str
     simulated: bool = False
-    local: bool = False  # supplied by hand rather than downloaded
 
     @property
     def size_mb(self) -> float:
@@ -84,9 +83,6 @@ class DownloadService:
                 sha256="",
                 simulated=True,
             )
-
-        if self.settings.use_local_jar:
-            return self._use_local_jar(destination, filename)
 
         url = self.build_url(hub_name)
         partial = destination.with_suffix(destination.suffix + ".part")
@@ -145,35 +141,6 @@ class DownloadService:
             sha256=digest.hexdigest(),
         )
 
-    def _use_local_jar(self, path: Path, filename: str) -> DownloadResult:
-        """Use a JAR placed in TEMP_DIR by hand instead of contacting the hub.
-
-        For when the installation hub is unreachable. Opt-in via USE_LOCAL_JAR
-        so a stale file can never be picked up by accident.
-        """
-        if not path.is_file():
-            raise DownloadError(
-                f"USE_LOCAL_JAR is enabled but {filename} was not found.\n"
-                f"Copy it to: {path.parent}\n"
-                f"Expected exact filename: {filename}"
-            )
-        if not self._looks_like_jar(path):
-            raise DownloadError(f"{path} is not a JAR archive (missing the ZIP 'PK' header)")
-
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(64 * 1024), b""):
-                digest.update(chunk)
-
-        logger.warning("USE_LOCAL_JAR: using %s without contacting the installation hub", path)
-        return DownloadResult(
-            filename=filename,
-            path=path,
-            size_bytes=path.stat().st_size,
-            sha256=digest.hexdigest(),
-            local=True,
-        )
-
     @staticmethod
     def _looks_like_jar(path: Path) -> bool:
         """A JAR is a ZIP: it must start with the local-file-header magic."""
@@ -184,11 +151,8 @@ class DownloadService:
             return False
 
     def cleanup(self, path: Path | None) -> None:
-        """Remove the temporary JAR after a successful deployment.
-
-        A hand-placed JAR is never deleted - it is the user's file, not ours.
-        """
-        if path is None or self.settings.keep_temp_files or self.settings.use_local_jar:
+        """Remove the temporary JAR after a successful deployment."""
+        if path is None or self.settings.keep_temp_files:
             return
         try:
             Path(path).unlink(missing_ok=True)

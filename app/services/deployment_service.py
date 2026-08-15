@@ -205,7 +205,6 @@ class DeploymentService:
             "size_mb": result.size_mb,
             "sha256": result.sha256,
             "simulated": result.simulated,
-            "local": result.local,
         }
 
     async def connect(self) -> str:
@@ -446,14 +445,7 @@ class DeploymentService:
             result = await self.download_jar(service_key, version)
         except DownloadError as exc:
             raise DeploymentError("download", str(exc)) from exc
-        if result.get("local"):
-            await self._log(
-                f"USE_LOCAL_JAR: using {result['path']} ({result['size_mb']} MB) - "
-                "the installation hub was NOT contacted",
-                level="warn",
-            )
-        else:
-            await self._log(f"Downloaded {result['filename']} ({result['size_mb']} MB)")
+        await self._log(f"Downloaded {result['filename']} ({result['size_mb']} MB)")
         await self._log(f"Local SHA-256: {result['sha256']}")
         if self.state.checksum and result["sha256"] and result["sha256"].lower() != self.state.checksum.lower():
             await self._log(
