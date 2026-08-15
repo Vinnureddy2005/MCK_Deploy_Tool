@@ -233,7 +233,7 @@ def _apply_env(monkeypatch, tmp_path, **overrides) -> config.Settings:
         "SSH_KEY_PATH": str(tmp_path / "id_rsa"),
         "BACKUP_LAYOUT": "nested",
         "BACKUP_ROOT": "/home/AidenAI/binaries/backups",
-        "BACKUP_DATE_FORMAT": "%Y-%m-%d",
+        "BACKUP_DATE_FORMAT": "%b%d",
         "CHECKSUM_PATTERN": r"^[a-fA-F0-9]{64}$",
         "HEALTH_CHECK_DELAY": "0",
         "USE_SUDO": "true",

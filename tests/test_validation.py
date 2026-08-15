@@ -162,8 +162,28 @@ def test_remote_paths_are_built_from_config(dry_settings):
 # --- backup path generation ------------------------------------------------
 
 
+def test_dated_folder_uses_the_manual_convention(dry_settings):
+    """Aug15, not 2026-08-15 - matches the folders created by hand today."""
+    from app.config import backup_date_folder, copydata_dir
+
+    assert backup_date_folder(date(2026, 8, 15)) == "Aug15"
+    assert backup_date_folder(date(2026, 12, 1)) == "Dec01"
+    # the same folder name is used for CopyData and for backups
+    assert copydata_dir(date(2026, 8, 15)) == "/home/day6sio/CopyData/Aug15"
+    assert backup_dir(date(2026, 8, 15)) == "/home/AidenAI/binaries/backups/Aug15"
+
+
+def test_date_format_is_configurable(monkeypatch, tmp_path):
+    monkeypatch.setenv("BACKUP_DATE_FORMAT", "%Y-%m-%d")
+    config.reload_settings()
+    try:
+        assert backup_dir(date(2026, 8, 15)) == "/home/AidenAI/binaries/backups/2026-08-15"
+    finally:
+        config.reload_settings()
+
+
 def test_nested_backup_path(dry_settings):
-    assert backup_dir(date(2026, 8, 14)) == "/home/AidenAI/binaries/backups/2026-08-14"
+    assert backup_dir(date(2026, 8, 14)) == "/home/AidenAI/binaries/backups/Aug14"
 
 
 def test_flat_backup_path_matches_the_manual_convention(monkeypatch, tmp_path):

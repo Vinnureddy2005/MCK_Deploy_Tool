@@ -23,7 +23,7 @@ BACKUP = "/home/AidenAI/binaries/backups"
 async def test_backup_directory_is_created(fake_ssh, live_settings):
     service = BackupService(fake_ssh, live_settings)
     directory = await service.create_backup_dir(date(2026, 8, 14))
-    assert directory == f"{BACKUP}/2026-08-14"
+    assert directory == f"{BACKUP}/Aug14"
     assert f"sudo mkdir -p {directory}" in fake_ssh.commands
 
 
@@ -32,8 +32,8 @@ async def test_existing_jar_is_copied_into_the_backup(live_settings):
     service = BackupService(ssh, live_settings)
     result = await service.backup_jar(JAR, when=date(2026, 8, 14))
     assert result["source"] == BIN_JAR
-    assert result["destination"] == f"{BACKUP}/2026-08-14/{JAR}"
-    assert f"sudo cp -p {BIN_JAR} {BACKUP}/2026-08-14/{JAR}" in ssh.commands
+    assert result["destination"] == f"{BACKUP}/Aug14/{JAR}"
+    assert f"sudo cp -p {BIN_JAR} {BACKUP}/Aug14/{JAR}" in ssh.commands
 
 
 async def test_first_deployment_has_no_jar_to_back_up(live_settings):
@@ -44,7 +44,7 @@ async def test_first_deployment_has_no_jar_to_back_up(live_settings):
 
 
 async def test_existing_backup_is_never_silently_overwritten(live_settings):
-    destination = f"{BACKUP}/2026-08-14/{JAR}"
+    destination = f"{BACKUP}/Aug14/{JAR}"
     ssh = FakeSSH(live_settings, existing={BIN_JAR, UNIT_PATH, destination})
     service = BackupService(ssh, live_settings)
 
@@ -60,7 +60,7 @@ async def test_only_the_selected_unit_file_is_backed_up(live_settings):
     ssh = FakeSSH(live_settings, existing={BIN_JAR, UNIT_PATH})
     service = BackupService(ssh, live_settings)
     result = await service.backup_unit_file(UNIT, when=date(2026, 8, 14))
-    assert result["destination"] == f"{BACKUP}/2026-08-14/{UNIT}"
+    assert result["destination"] == f"{BACKUP}/Aug14/{UNIT}"
     copies = [c for c in ssh.commands if c.startswith("sudo cp")]
     assert len(copies) == 1
     assert "aiDAPApp.service" not in " ".join(ssh.commands)

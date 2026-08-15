@@ -120,8 +120,8 @@ class Settings:
 
     backup_layout: str = "nested"
     backup_root: str = "/home/AidenAI/binaries/backups"
-    backup_date_format: str = "%Y-%m-%d"
-    stage_in_copydata: bool = True
+    # Aug15 - the existing manual convention for dated folders.
+    backup_date_format: str = "%b%d"
 
     checksum_pattern: str = r"^[a-fA-F0-9]{64}$"
 
@@ -163,8 +163,7 @@ class Settings:
             remote_webdav_dir=_env("REMOTE_WEBDAV_DIR", "/var/www/webdav"),
             backup_layout=_env("BACKUP_LAYOUT", "nested").lower(),
             backup_root=_env("BACKUP_ROOT", "/home/AidenAI/binaries/backups"),
-            backup_date_format=_env("BACKUP_DATE_FORMAT", "%Y-%m-%d"),
-            stage_in_copydata=_env_bool("STAGE_IN_COPYDATA", True),
+            backup_date_format=_env("BACKUP_DATE_FORMAT", "%b%d"),
             checksum_pattern=_env("CHECKSUM_PATTERN", r"^[a-fA-F0-9]{64}$"),
             log_tail_lines=_env_int("LOG_TAIL_LINES", 200),
             health_check_delay=_env_int("HEALTH_CHECK_DELAY", 8),
@@ -351,19 +350,19 @@ def remote_path(directory: str, *components: str) -> str:
 
 
 def backup_date_folder(when: date | None = None) -> str:
+    """The dated folder name shared by CopyData and the backup directory.
+
+    Defaults to the manual convention: Aug15, not 2026-08-15.
+    """
     when = when or datetime.now().date()
-    fmt = settings.backup_date_format
-    if settings.backup_layout == "flat" and fmt == "%Y-%m-%d":
-        # The existing manual convention is Aug14 rather than 2026-08-14.
-        fmt = "%b%d"
-    return _safe_component(when.strftime(fmt))
+    return _safe_component(when.strftime(settings.backup_date_format))
 
 
 def backup_dir(when: date | None = None) -> str:
     """Dated backup directory for this deployment.
 
-    nested -> <BACKUP_ROOT>/2026-08-14      (recommended)
-    flat   -> <BINARIES_DIR>/Aug14          (existing manual convention)
+    nested -> <BACKUP_ROOT>/Aug15      (recommended)
+    flat   -> <BINARIES_DIR>/Aug15     (existing manual convention)
     """
     folder = backup_date_folder(when)
     if settings.backup_layout == "flat":
