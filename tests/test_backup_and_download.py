@@ -191,6 +191,72 @@ async def test_dry_run_download_makes_no_request(dry_settings):
     assert not result.path.exists()
 
 
+async def test_local_jar_is_used_when_the_hub_is_unavailable(monkeypatch, tmp_path):
+    """USE_LOCAL_JAR: deploy a hand-placed JAR without contacting the hub."""
+    from app import config
+
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("USE_LOCAL_JAR", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "")  # hub deliberately not configured
+    settings = config.reload_settings()
+    try:
+        jar = tmp_path / JAR
+        jar.write_bytes(b"PK\x03\x04" + b"x" * 100)
+
+        result = await DownloadService(settings).download("tx-test-mgmt")
+        assert result.local is True
+        assert result.path == jar
+        assert result.size_bytes == 104
+        assert len(result.sha256) == 64
+    finally:
+        config.reload_settings()
+
+
+async def test_local_jar_missing_gives_a_clear_error(monkeypatch, tmp_path):
+    from app import config
+
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("USE_LOCAL_JAR", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    settings = config.reload_settings()
+    try:
+        with pytest.raises(DownloadError, match="was not found"):
+            await DownloadService(settings).download("tx-test-mgmt")
+    finally:
+        config.reload_settings()
+
+
+async def test_local_jar_must_actually_be_a_jar(monkeypatch, tmp_path):
+    from app import config
+
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("USE_LOCAL_JAR", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    settings = config.reload_settings()
+    try:
+        (tmp_path / JAR).write_bytes(b"<html>not a jar</html>")
+        with pytest.raises(DownloadError, match="not a JAR"):
+            await DownloadService(settings).download("tx-test-mgmt")
+    finally:
+        config.reload_settings()
+
+
+def test_hand_placed_jar_is_never_deleted(monkeypatch, tmp_path):
+    from app import config
+
+    monkeypatch.setenv("USE_LOCAL_JAR", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    settings = config.reload_settings()
+    try:
+        jar = tmp_path / JAR
+        jar.write_bytes(b"PK\x03\x04")
+        DownloadService(settings).cleanup(jar)
+        assert jar.exists(), "a user-supplied JAR must survive cleanup"
+    finally:
+        config.reload_settings()
+
+
 def test_html_error_page_is_not_accepted_as_a_jar(tmp_path, live_settings):
     fake = tmp_path / "fake.jar"
     fake.write_bytes(b"<html><body>Not found</body></html>")

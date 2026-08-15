@@ -112,6 +112,9 @@ class Settings:
     installation_hub_url: str = ""
     installation_code: str = ""
     download_timeout: int = 300
+    # Fallback for when the installation hub is unreachable: use a JAR that has
+    # been placed in TEMP_DIR by hand instead of downloading it.
+    use_local_jar: bool = False
 
     remote_binaries_dir: str = "/home/AidenAI/binaries"
     remote_systemd_dir: str = "/etc/systemd/system"
@@ -157,6 +160,7 @@ class Settings:
             installation_hub_url=_env("INSTALLATION_HUB_URL"),
             installation_code=_env("INSTALLATION_CODE"),
             download_timeout=_env_int("DOWNLOAD_TIMEOUT", 300),
+            use_local_jar=_env_bool("USE_LOCAL_JAR", False),
             remote_binaries_dir=_env("REMOTE_BINARIES_DIR", "/home/AidenAI/binaries"),
             remote_systemd_dir=_env("REMOTE_SYSTEMD_DIR", "/etc/systemd/system"),
             remote_copydata_dir=_env("REMOTE_COPYDATA_DIR", "/home/day6sio/CopyData"),
