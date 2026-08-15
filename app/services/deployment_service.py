@@ -266,6 +266,41 @@ class DeploymentService:
                 )
         return {"unit": unit, "path": path, "previous": previous, "new": new_value}
 
+    async def get_current_checksum(self, service_key: str) -> dict[str, Any]:
+        """Read the APP_CHECKSUM currently in the unit file. Read-only."""
+        cfg = get_service(service_key)
+        unit = validate_unit_name(cfg["systemd_service"])
+        path = systemd_path(unit)
+
+        if self.ssh.offline:
+            return {
+                "unit": unit,
+                "path": path,
+                "checksum": "",
+                "found": False,
+                "message": "Offline dry-run: set DRY_RUN_CONNECT=true to read the server",
+            }
+
+        await self.ssh.connect()
+        content = await self.ssh.read_file(path)
+        if not content.strip():
+            return {
+                "unit": unit,
+                "path": path,
+                "checksum": "",
+                "found": False,
+                "message": f"Could not read {path}",
+            }
+
+        value = extract_checksum(content)
+        return {
+            "unit": unit,
+            "path": path,
+            "checksum": value or "",
+            "found": bool(value),
+            "message": "" if value else f"No APP_CHECKSUM line found in {path}",
+        }
+
     async def find_port_process(self, port: int) -> dict[str, Any]:
         """Read-only lsof lookup. Never kills anything."""
         port = validate_port(port)

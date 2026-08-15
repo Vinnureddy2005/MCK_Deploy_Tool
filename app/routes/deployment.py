@@ -186,6 +186,15 @@ async def restart(payload: ServiceRequest) -> dict:
         raise _handle(exc) from exc
 
 
+@router.get("/deployment/current-checksum")
+async def current_checksum(service_key: str) -> dict:
+    """The APP_CHECKSUM currently in the unit file on the server. Read-only."""
+    try:
+        return await deployment_service.get_current_checksum(service_key)
+    except Exception as exc:
+        raise _handle(exc) from exc
+
+
 @router.get("/deployment/service-status")
 async def service_status(service_key: str) -> dict:
     try:

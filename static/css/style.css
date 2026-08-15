@@ -131,8 +131,10 @@ textarea.control { resize: vertical; word-break: break-all; }
 .info { display: grid; grid-template-columns: 130px 1fr; gap: 7px 10px; font-size: 12px; }
 .info dt { color: var(--muted); }
 .info dd { word-break: break-all; }
-.info dd.ok  { color: var(--ok); }
-.info dd.err { color: var(--err); }
+.info dd.ok   { color: var(--ok); }
+.info dd.err  { color: var(--err); }
+.info dd.warn { color: var(--warn); }
+.info dt .hint { font-size: 10px; text-transform: none; }
 
 /* ---------------------------------------------------------------- pipeline */
 .pipeline { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 22px; }

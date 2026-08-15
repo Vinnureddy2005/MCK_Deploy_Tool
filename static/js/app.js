@@ -45,8 +45,11 @@ const ui = {
     unit: el('info-unit'),
     port: el('info-port'),
     backup: el('info-backup'),
+    current: el('info-current'),
+    newValue: el('info-new'),
     checksum: el('info-checksum'),
   },
+  fetchCurrent: el('fetch-current'),
   overlay: el('port-overlay'),
   conflictPort: el('conflict-port'),
   conflictList: el('conflict-list'),
@@ -61,6 +64,7 @@ const state = {
   config: null,
   verified: false,
   deploying: false,
+  currentChecksum: '',
   logCleared: false,
   selectedPid: null,
   conflictPort: null,
@@ -170,6 +174,58 @@ function invalidateVerification(reason) {
   ui.info.checksum.textContent = reason;
   ui.info.checksum.className = '';
   ui.verifyMsg.hidden = true;
+  showNewChecksum();
+}
+
+/* Shows the pasted value, and whether it differs from what is on the server. */
+function showNewChecksum() {
+  const value = ui.checksum.value.trim();
+  if (!value) {
+    ui.info.newValue.textContent = '—';
+    ui.info.newValue.className = 'mono';
+    return;
+  }
+  ui.info.newValue.textContent = value;
+  ui.info.newValue.title = value;
+
+  if (!state.currentChecksum) {
+    ui.info.newValue.className = 'mono';
+    return;
+  }
+  const same = value.toLowerCase() === state.currentChecksum.toLowerCase();
+  ui.info.newValue.className = same ? 'mono warn' : 'mono ok';
+  ui.info.newValue.textContent = same ? `${value}  (same as server — no change)` : value;
+}
+
+async function fetchCurrentChecksum() {
+  const service = currentService();
+  if (!service) return;
+
+  ui.fetchCurrent.disabled = true;
+  ui.info.current.textContent = 'reading…';
+  ui.info.current.className = 'mono';
+  try {
+    const result = await api(
+      `/api/deployment/current-checksum?service_key=${encodeURIComponent(service.key)}`
+    );
+    if (result.found) {
+      state.currentChecksum = result.checksum;
+      ui.info.current.textContent = result.checksum;
+      ui.info.current.title = `${result.path}\n${result.checksum}`;
+      ui.info.current.className = 'mono ok';
+    } else {
+      state.currentChecksum = '';
+      ui.info.current.textContent = result.message || 'not found';
+      ui.info.current.className = 'mono err';
+    }
+  } catch (error) {
+    state.currentChecksum = '';
+    ui.info.current.textContent = error.message;
+    ui.info.current.className = 'mono err';
+  } finally {
+    ui.fetchCurrent.disabled = false;
+    showNewChecksum();
+  }
 }
 
 /* ------------------------------------------------------------------ boot */
@@ -449,8 +505,13 @@ async function killProcess() {
 
 ui.service.addEventListener('change', () => {
   refreshInfo();
+  // the previous service's checksum says nothing about this one
+  state.currentChecksum = '';
+  ui.info.current.textContent = '—';
+  ui.info.current.className = 'mono';
   invalidateVerification('Waiting for verification');
 });
+ui.fetchCurrent.addEventListener('click', fetchCurrentChecksum);
 ui.version.addEventListener('input', () => {
   refreshInfo();
   invalidateVerification('Waiting for verification');
