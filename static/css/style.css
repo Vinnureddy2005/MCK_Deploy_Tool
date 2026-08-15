@@ -1,0 +1,218 @@
+:root {
+  --bg: #0f1419;
+  --panel: #171d26;
+  --panel-2: #1e2632;
+  --border: #2a3441;
+  --text: #e5eaf0;
+  --muted: #8b98a8;
+  --accent: #2f7fd8;
+  --accent-hover: #3d8fe8;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --err: #f05a5a;
+  --mono: "Cascadia Mono", "Consolas", "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+/* ---------------------------------------------------------------- topbar */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  padding: 14px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark {
+  display: grid; place-items: center;
+  width: 42px; height: 42px; border-radius: 8px;
+  background: var(--accent); color: #fff;
+  font-weight: 700; letter-spacing: .5px; font-size: 13px;
+}
+.topbar h1 { font-size: 17px; font-weight: 600; letter-spacing: .2px; }
+.brand-sub { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+.badges { display: flex; align-items: center; gap: 8px; }
+.badge {
+  padding: 5px 11px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: .6px;
+  border: 1px solid transparent;
+}
+.badge-dry  { background: rgba(210,153,34,.15); color: var(--warn); border-color: rgba(210,153,34,.4); }
+.badge-live { background: rgba(240,90,90,.15);  color: var(--err);  border-color: rgba(240,90,90,.4); }
+.badge-conn { background: var(--panel-2); color: var(--muted); border-color: var(--border); }
+.badge-conn.online  { color: var(--ok);  border-color: rgba(63,185,80,.4); }
+.badge-conn.offline { color: var(--err); border-color: rgba(240,90,90,.4); }
+
+/* ---------------------------------------------------------------- layout */
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 18px;
+  padding: 18px 24px 32px;
+  align-items: start;
+}
+@media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+}
+.panel-wide { min-width: 0; }
+.panel-title {
+  font-size: 12px; font-weight: 700; letter-spacing: 1.2px;
+  text-transform: uppercase; color: var(--muted);
+  margin-bottom: 14px;
+}
+.panel-subtitle { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.divider { height: 1px; background: var(--border); margin: 18px 0; }
+
+/* ---------------------------------------------------------------- form */
+.field-label {
+  display: block; margin: 14px 0 6px;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+}
+.field-label:first-of-type { margin-top: 0; }
+.hint { font-weight: 400; font-style: italic; opacity: .8; }
+
+.control {
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+.control:focus { outline: none; border-color: var(--accent); }
+textarea.control { resize: vertical; word-break: break-all; }
+.mono { font-family: var(--mono); }
+
+.btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary   { background: var(--accent); color: #fff; }
+.btn-primary:not(:disabled):hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--panel-2); color: var(--text); border-color: var(--border); }
+.btn-secondary:not(:disabled):hover { border-color: var(--accent); }
+.btn-danger    { background: var(--err); color: #fff; }
+.btn-ghost     { background: transparent; color: var(--muted); border-color: var(--border); }
+.btn-ghost:hover { color: var(--text); }
+
+.checkbox { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.checkbox.inline { margin: 0; }
+.checkbox input { accent-color: var(--accent); }
+
+.message { margin-top: 10px; padding: 9px 11px; border-radius: 6px; font-size: 12px; word-break: break-word; }
+.message.ok    { background: rgba(63,185,80,.1);  color: var(--ok);   border: 1px solid rgba(63,185,80,.3); }
+.message.error { background: rgba(240,90,90,.1);  color: var(--err);  border: 1px solid rgba(240,90,90,.3); }
+.footnote { margin-top: 10px; font-size: 11px; color: var(--muted); text-align: center; }
+
+/* ---------------------------------------------------------------- info */
+.info { display: grid; grid-template-columns: 130px 1fr; gap: 7px 10px; font-size: 12px; }
+.info dt { color: var(--muted); }
+.info dd { word-break: break-all; }
+.info dd.ok  { color: var(--ok); }
+.info dd.err { color: var(--err); }
+
+/* ---------------------------------------------------------------- pipeline */
+.pipeline { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 22px; }
+.stage {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px; color: var(--muted);
+}
+.stage-icon { width: 13px; text-align: center; font-weight: 700; }
+.stage.running   { border-color: var(--accent); color: var(--text); }
+.stage.running .stage-icon { animation: spin 1s linear infinite; display: inline-block; }
+.stage.completed { border-color: rgba(63,185,80,.45); color: var(--ok); }
+.stage.failed    { border-color: rgba(240,90,90,.55); color: var(--err); background: rgba(240,90,90,.08); }
+.stage.skipped   { opacity: .45; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------------------------------------------------------------- logs */
+.log-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.log-header .panel-title { margin-bottom: 0; }
+.log-actions { display: flex; align-items: center; gap: 12px; }
+.log-actions .btn { width: auto; margin: 0; padding: 5px 12px; font-size: 11px; }
+
+.terminal {
+  margin-top: 12px;
+  height: 460px;
+  overflow: auto;
+  padding: 14px;
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.terminal-sm { height: 150px; margin-top: 12px; }
+.log-line { display: block; }
+.log-time { color: #5a6675; margin-right: 8px; }
+.log-info    { color: #c8d3e0; }
+.log-success { color: var(--ok); font-weight: 600; }
+.log-warn    { color: var(--warn); }
+.log-error   { color: var(--err); font-weight: 600; }
+.log-journal { color: #7fb3e8; }
+.log-stage   { color: #b48ce8; }
+
+/* ---------------------------------------------------------------- modal */
+.overlay {
+  position: fixed; inset: 0;
+  display: grid; place-items: center;
+  background: rgba(0,0,0,.65);
+  padding: 20px;
+  z-index: 50;
+}
+/* `display` above outranks the browser's [hidden] rule, so restate it here.
+   Without this the port-conflict dialog is visible on page load. */
+.overlay[hidden] { display: none; }
+.modal {
+  width: min(560px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px;
+}
+.modal-title { font-size: 16px; margin-bottom: 10px; color: var(--err); }
+.modal-text { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+.conflict-list { display: grid; gap: 8px; }
+.conflict-row {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 14px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono); font-size: 12px;
+  cursor: pointer;
+}
+.conflict-row.selected { border-color: var(--accent); }
+.conflict-row span:nth-child(odd) { color: var(--muted); }
+.modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+.modal-actions .btn { margin-top: 0; }

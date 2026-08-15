@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>McKesson Deployment Tool</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">MCK</span>
+    <div>
+      <h1>McKesson Deployment Tool</h1>
+      <p class="brand-sub" id="target-host">Loading configuration&hellip;</p>
+    </div>
+  </div>
+  <div class="badges">
+    <span class="badge badge-dry" id="mode-badge" hidden>DRY RUN</span>
+    <span class="badge badge-live" id="live-badge" hidden>LIVE DEPLOYMENT</span>
+    <span class="badge badge-conn" id="socket-badge">connecting&hellip;</span>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ------------------------------------------------ left: controls -->
+  <section class="panel">
+    <h2 class="panel-title">Deployment</h2>
+
+    <label class="field-label" for="service">Select service</label>
+    <select id="service" class="control"></select>
+
+    <label class="field-label" for="version">Version</label>
+    <input id="version" class="control" type="text" placeholder="1.6.0" autocomplete="off">
+
+    <label class="field-label" for="checksum">
+      Checksum
+      <span class="hint">copied manually from the Aiden application</span>
+    </label>
+    <textarea id="checksum" class="control mono" rows="3"
+              placeholder="Paste checksum copied from Aiden application"
+              spellcheck="false" autocomplete="off"></textarea>
+
+    <button id="verify-btn" class="btn btn-secondary">Verify checksum</button>
+    <p id="verify-msg" class="message" hidden></p>
+
+    <div class="divider"></div>
+
+    <h3 class="panel-subtitle">Deployment information</h3>
+    <dl class="info">
+      <dt>Service</dt><dd id="info-service">&mdash;</dd>
+      <dt>JAR</dt><dd id="info-jar" class="mono">&mdash;</dd>
+      <dt>Systemd service</dt><dd id="info-unit" class="mono">&mdash;</dd>
+      <dt>Port</dt><dd id="info-port" class="mono">&mdash;</dd>
+      <dt>Backup folder</dt><dd id="info-backup" class="mono">&mdash;</dd>
+      <dt>Checksum status</dt><dd id="info-checksum">Waiting for verification</dd>
+    </dl>
+
+    <label class="checkbox">
+      <input type="checkbox" id="overwrite-backup">
+      <span>Overwrite an existing backup for today</span>
+    </label>
+
+    <button id="deploy-btn" class="btn btn-primary" disabled>Deploy</button>
+    <p class="footnote">Deployment is blocked until the checksum is verified.</p>
+  </section>
+
+  <!-- ------------------------------------------------ right: pipeline + logs -->
+  <section class="panel panel-wide">
+    <h2 class="panel-title">Pipeline</h2>
+    <ol class="pipeline" id="pipeline"></ol>
+
+    <div class="log-header">
+      <h2 class="panel-title">Live logs</h2>
+      <div class="log-actions">
+        <label class="checkbox inline">
+          <input type="checkbox" id="autoscroll" checked><span>Auto-scroll</span>
+        </label>
+        <button id="clear-logs" class="btn btn-ghost">Clear</button>
+      </div>
+    </div>
+    <pre id="logs" class="terminal">[Waiting for deployment...]</pre>
+  </section>
+</main>
+
+<!-- ------------------------------------------------ port conflict dialog -->
+<div class="overlay" id="port-overlay" hidden>
+  <div class="modal">
+    <h2 class="modal-title">Port <span id="conflict-port"></span> is occupied</h2>
+    <p class="modal-text">
+      The service could not start because another process holds the port.
+      Nothing will be terminated without your confirmation.
+    </p>
+    <div id="conflict-list" class="conflict-list"></div>
+    <pre id="conflict-detail" class="terminal terminal-sm" hidden></pre>
+    <div class="modal-actions">
+      <button id="view-process" class="btn btn-secondary">View process</button>
+      <button id="kill-process" class="btn btn-danger">Kill process</button>
+      <button id="cancel-conflict" class="btn btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
