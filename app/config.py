@@ -47,7 +47,9 @@ SERVICES: dict[str, dict[str, Any]] = {
     "tx-test-mgmt": {
         "display_name": "TX Test Management",
         "hub_filename": "",  # empty -> use the JAR filename
-        "log_file": "",  # empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
+        # Verified with `ls /var/www/webdav` on the server. The log names do not
+        # follow the JAR name, so each one is set explicitly.
+        "log_file": "/var/www/webdav/txTestMgmt.log",
         "jar_prefix": "tx-test-mgmt",
         "systemd_service": "aiTXTTestMgmt.service",
         "default_version": "1.6.0",
@@ -56,7 +58,7 @@ SERVICES: dict[str, dict[str, Any]] = {
     "ai-dap-app": {
         "display_name": "AI DAP App",
         "hub_filename": "",  # empty -> use the JAR filename
-        "log_file": "",  # empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
+        "log_file": "/var/www/webdav/aiDAPApp.log",
         "jar_prefix": "ai-dap-app",
         "systemd_service": "aiDAPApp.service",
         "default_version": "1.6.0",
@@ -65,7 +67,7 @@ SERVICES: dict[str, dict[str, Any]] = {
     "tx-integration-agent": {
         "display_name": "TX Integration Agent",
         "hub_filename": "",  # empty -> use the JAR filename
-        "log_file": "",  # empty -> <REMOTE_WEBDAV_DIR>/<jar_prefix>.log
+        "log_file": "/var/www/webdav/tx-integration-agent.log",
         "jar_prefix": "tx-integration-agent",
         "systemd_service": "aiTXIntegrationAgent.service",
         "default_version": "1.6.0",
@@ -119,6 +121,10 @@ class Settings:
     installation_hub_url: str = ""
     installation_code: str = ""
     download_timeout: int = 300
+    # APP_CHECKSUM is the SHA-256 of the JAR itself. If the pasted value does
+    # not match the JAR that arrived, the service fails its startup integrity
+    # check - so stop at DOWNLOAD, before anything on the server is touched.
+    verify_jar_checksum: bool = True
 
     remote_binaries_dir: str = "/home/AidenAI/binaries"
     remote_systemd_dir: str = "/etc/systemd/system"
@@ -164,6 +170,7 @@ class Settings:
             installation_hub_url=_env("INSTALLATION_HUB_URL"),
             installation_code=_env("INSTALLATION_CODE"),
             download_timeout=_env_int("DOWNLOAD_TIMEOUT", 300),
+            verify_jar_checksum=_env_bool("VERIFY_JAR_CHECKSUM", True),
             remote_binaries_dir=_env("REMOTE_BINARIES_DIR", "/home/AidenAI/binaries"),
             remote_systemd_dir=_env("REMOTE_SYSTEMD_DIR", "/etc/systemd/system"),
             remote_copydata_dir=_env("REMOTE_COPYDATA_DIR", "/home/day6sio/CopyData"),

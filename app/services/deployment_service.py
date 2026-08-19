@@ -503,12 +503,36 @@ class DeploymentService:
             raise DeploymentError("download", str(exc)) from exc
         await self._log(f"Downloaded {result['filename']} ({result['size_mb']} MB)")
         await self._log(f"Local SHA-256: {result['sha256']}")
-        if self.state.checksum and result["sha256"] and result["sha256"].lower() != self.state.checksum.lower():
+
+        # APP_CHECKSUM is the SHA-256 of the JAR (verified against the build's
+        # APP_CHECKSUM.txt, the Aiden tool, and the live server). So a mismatch
+        # is never expected - it means the checksum and the JAR come from
+        # different builds, and the service will fail its startup integrity
+        # check. Stop here, while the server is still untouched.
+        mismatch = bool(
+            self.state.checksum
+            and result["sha256"]
+            and result["sha256"].lower() != self.state.checksum.lower()
+        )
+        if mismatch and self.settings.verify_jar_checksum:
+            raise DeploymentError(
+                "download",
+                "The pasted checksum does not match the downloaded JAR.",
+                f"JAR digest   : {result['sha256']}\n"
+                f"Pasted value : {self.state.checksum}\n"
+                "Nothing on the server has been changed. The installation hub may be "
+                "serving an older build than the checksum you were given - re-check it "
+                "in the Aiden application before deploying.",
+            )
+        if mismatch:
             await self._log(
-                "Note: the JAR file digest differs from the pasted APP_CHECKSUM. "
-                "This is expected when the build publishes a separate application checksum.",
+                "VERIFY_JAR_CHECKSUM is off: the JAR does not match the pasted checksum, "
+                "and the service will fail its startup integrity check.",
                 level="warn",
             )
+        elif result["sha256"]:
+            await self._log("Checksum matches the downloaded JAR")
+
         await self._set_stage("download", COMPLETED, f"{result['size_mb']} MB")
 
     async def _stage_connect(self) -> None:

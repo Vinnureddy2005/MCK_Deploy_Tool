@@ -284,7 +284,14 @@ async def test_failed_copydata_upload_stops_before_any_backup(live_settings, tmp
     jar = make_jar(tmp_path)
 
     async def fake_download(service_key, version=None):
-        return {"filename": JAR, "path": str(jar), "size_mb": 0.1, "sha256": "x", "simulated": False}
+        # must match the pasted checksum, or the download stage stops first
+        return {
+            "filename": JAR,
+            "path": str(jar),
+            "size_mb": 0.1,
+            "sha256": VALID_CHECKSUM,
+            "simulated": False,
+        }
 
     service.download_jar = fake_download
     service._local_jar = jar

@@ -120,11 +120,126 @@ async def test_unit_file_is_read_without_sudo_when_possible(live_settings):
     assert result["checksum"] == "aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990"
 
 
-def test_app_log_path_defaults_to_the_webdav_convention(dry_settings):
+def test_app_log_paths_match_the_files_on_the_server(dry_settings):
+    """Verified with `ls /var/www/webdav` - the names do not follow the JAR."""
     from app.config import service_log_file
 
     assert service_log_file("tx-integration-agent") == "/var/www/webdav/tx-integration-agent.log"
-    assert service_log_file("tx-test-mgmt") == "/var/www/webdav/tx-test-mgmt.log"
+    assert service_log_file("tx-test-mgmt") == "/var/www/webdav/txTestMgmt.log"
+    assert service_log_file("ai-dap-app") == "/var/www/webdav/aiDAPApp.log"
+
+
+async def test_mismatched_checksum_stops_before_the_server_is_touched(monkeypatch, tmp_path):
+    """A checksum that is not the JAR's digest guarantees a failed startup."""
+    from app import config
+
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("DRY_RUN_CONNECT", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "http://hub.example.test/api/installation-hubs/path")
+    monkeypatch.setenv("INSTALLATION_CODE", "TEST-CODE-123")
+    monkeypatch.setenv("SSH_PASSWORD", "test-only")
+    monkeypatch.setenv("HEALTH_CHECK_DELAY", "0")
+    settings = config.reload_settings()
+    try:
+        ssh = FakeSSH(settings)
+        service = build(settings, ssh)
+
+        async def fake_download(service_key, version=None):
+            # the hub served a different build from the one the checksum names
+            return {
+                "filename": "tx-integration-agent-1.6.0.jar",
+                "path": str(tmp_path / "x.jar"),
+                "size_mb": 193.42,
+                "sha256": "f9bc3cbd2496f6157c35a6c9b2789516568f4e03cb28e67416399ff3456280d8",
+                "simulated": False,
+            }
+
+        service.download_jar = fake_download
+        state = await service.deploy("tx-integration-agent", VALID_CHECKSUM)
+
+        assert state.status == "failed"
+        assert state.error_stage == "download"
+        assert "does not match" in state.error
+        # the whole point: nothing on the server may have been touched
+        assert not any(
+            word in command
+            for command in ssh.commands
+            for word in ("cp ", "tee ", "restart", "mkdir")
+        ), ssh.commands
+        assert ssh.written == {}
+        for stage in ("upload_to_copydata", "backup", "update_checksum", "restart"):
+            assert state.stages[stage]["status"] == "skipped", stage
+    finally:
+        config.reload_settings()
+
+
+async def test_matching_checksum_is_confirmed_in_the_log(monkeypatch, tmp_path):
+    from app import config
+
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("DRY_RUN_CONNECT", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "http://hub.example.test/api/installation-hubs/path")
+    monkeypatch.setenv("INSTALLATION_CODE", "TEST-CODE-123")
+    monkeypatch.setenv("SSH_PASSWORD", "test-only")
+    settings = config.reload_settings()
+    try:
+        service = build(settings, FakeSSH(settings))
+
+        async def fake_download(service_key, version=None):
+            return {
+                "filename": "tx-integration-agent-1.6.0.jar",
+                "path": str(tmp_path / "x.jar"),
+                "size_mb": 1.0,
+                "sha256": VALID_CHECKSUM,
+                "simulated": False,
+            }
+
+        service.download_jar = fake_download
+        service.state.checksum = VALID_CHECKSUM
+        await service._stage_download("tx-integration-agent", None)
+
+        messages = [e["message"] for e in service.broadcaster.history if e["type"] == "log"]
+        assert any("Checksum matches the downloaded JAR" in m for m in messages)
+    finally:
+        config.reload_settings()
+
+
+async def test_the_check_can_be_disabled(monkeypatch, tmp_path):
+    """An override exists, but it warns loudly rather than staying silent."""
+    from app import config
+
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("DRY_RUN_CONNECT", "true")
+    monkeypatch.setenv("TEMP_DIR", str(tmp_path))
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "http://hub.example.test/api/installation-hubs/path")
+    monkeypatch.setenv("INSTALLATION_CODE", "TEST-CODE-123")
+    monkeypatch.setenv("SSH_PASSWORD", "test-only")
+    monkeypatch.setenv("VERIFY_JAR_CHECKSUM", "false")
+    settings = config.reload_settings()
+    try:
+        service = build(settings, FakeSSH(settings))
+
+        async def fake_download(service_key, version=None):
+            return {
+                "filename": "tx-integration-agent-1.6.0.jar",
+                "path": str(tmp_path / "x.jar"),
+                "size_mb": 1.0,
+                "sha256": "f9bc3cbd2496f6157c35a6c9b2789516568f4e03cb28e67416399ff3456280d8",
+                "simulated": False,
+            }
+
+        service.download_jar = fake_download
+        service.state.checksum = VALID_CHECKSUM
+        await service._stage_download("tx-integration-agent", None)
+
+        warnings = [
+            e["message"] for e in service.broadcaster.history if e.get("level") == "warn"
+        ]
+        assert any("VERIFY_JAR_CHECKSUM is off" in m for m in warnings)
+    finally:
+        config.reload_settings()
 
 
 def test_app_log_path_can_be_overridden(dry_settings, monkeypatch):
