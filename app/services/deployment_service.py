@@ -8,6 +8,7 @@ failure in a critical stage stops the deployment - nothing continues blindly.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -156,6 +157,46 @@ class DeploymentService:
         if status == RUNNING:
             self.state.current_stage = stage
         await self.broadcaster.stage(stage, status, message, state=self.state.to_dict())
+
+    def _record_last_deployment(self) -> None:
+        """Persist a summary of the run that just finished.
+
+        Written on success and on failure, so the dashboard can show what
+        happened last even after the app is restarted.
+        """
+        record = {
+            "deployment_id": self.state.deployment_id,
+            "service_key": self.state.service_key,
+            "display_name": self.state.display_name,
+            "jar": self.state.jar,
+            "unit": self.state.unit,
+            "checksum": self.state.checksum,
+            "previous_checksum": self.state.previous_checksum,
+            "status": self.state.status,
+            "error": self.state.error,
+            "error_stage": self.state.error_stage,
+            "started_at": self.state.started_at,
+            "finished_at": self.state.finished_at,
+            "dry_run": self.state.dry_run,
+            "backup_dir": self.state.backup_dir,
+        }
+        try:
+            path = self.settings.last_deployment_file
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not record the last deployment: %s", exc)
+
+    def last_deployment(self) -> dict[str, Any] | None:
+        """The most recent run, or None if this tool has not deployed yet."""
+        try:
+            path = self.settings.last_deployment_file
+            if not path.is_file():
+                return None
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not read the last deployment record: %s", exc)
+            return None
 
     def _audit(self, line: str) -> None:
         try:
@@ -461,6 +502,7 @@ class DeploymentService:
         # Audit only - the browser draws its own banner from the `complete` event,
         # so logging it here as well would print the line twice.
         self._audit(f"SUCCESS {verb}")
+        self._record_last_deployment()
         await self.broadcaster.publish({"type": "complete", "status": "success", "state": self.state.to_dict()})
         return self.state
 
@@ -476,6 +518,7 @@ class DeploymentService:
         await self._log(f"DEPLOYMENT STOPPED at {stage.replace('_', ' ').upper()}: {message}", level="error")
         if detail:
             await self._log(detail, level="error")
+        self._record_last_deployment()
         await self.broadcaster.publish({"type": "complete", "status": "failed", "state": self.state.to_dict()})
 
     # -- stages -------------------------------------------------------------

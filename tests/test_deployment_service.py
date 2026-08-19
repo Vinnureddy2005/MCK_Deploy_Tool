@@ -262,6 +262,32 @@ def test_app_log_path_rejects_traversal(dry_settings, monkeypatch, bad):
             config.service_log_file("tx-test-mgmt")
 
 
+async def test_last_deployment_is_recorded_and_survives_a_restart(dry_settings):
+    service = build(dry_settings)
+    assert service.last_deployment() is None
+
+    await service.deploy("tx-integration-agent", VALID_CHECKSUM)
+
+    # a fresh instance reads it back from disk, as it would after a restart
+    record = build(dry_settings).last_deployment()
+    assert record["status"] == "success"
+    assert record["display_name"] == "TX Integration Agent"
+    assert record["jar"] == "tx-integration-agent-1.6.0.jar"
+    assert record["checksum"] == VALID_CHECKSUM
+    assert record["dry_run"] is True
+    assert record["finished_at"]
+
+
+async def test_a_failed_deployment_is_recorded_with_the_stage(dry_settings):
+    service = build(dry_settings)
+    await service.deploy("tx-integration-agent", "not-a-valid-checksum")
+
+    record = service.last_deployment()
+    assert record["status"] == "failed"
+    assert record["error_stage"] == "validate"
+    assert record["error"]
+
+
 async def test_app_log_tail_is_read_only(live_settings):
     ssh = FakeSSH(live_settings, responses={"tail": CommandResult("", 0, "boot ok\n", "")})
     service = build(live_settings, ssh)

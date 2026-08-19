@@ -219,6 +219,12 @@ async def deployment_status() -> dict:
     return deployment_service.state.to_dict()
 
 
+@router.get("/deployment/last")
+async def last_deployment() -> dict:
+    """Summary of the most recent run, surviving an app restart."""
+    return {"last": deployment_service.last_deployment()}
+
+
 @router.post("/deployment/deploy")
 async def deploy(payload: DeployRequest) -> dict:
     """Start the full pipeline. Progress is delivered over /ws/logs."""

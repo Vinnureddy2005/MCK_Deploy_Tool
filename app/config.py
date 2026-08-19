@@ -144,11 +144,17 @@ class Settings:
     temp_dir: Path = field(default_factory=lambda: BASE_DIR / "temp" / "deployments")
     keep_temp_files: bool = False
     audit_log: Path = field(default_factory=lambda: BASE_DIR / "temp" / "deployments.log")
+    # A one-line record of the most recent run, so the dashboard can still show
+    # it after the app restarts.
+    last_deployment_file: Path = field(
+        default_factory=lambda: BASE_DIR / "temp" / "last-deployment.json"
+    )
 
     @classmethod
     def from_env(cls) -> "Settings":
         temp_dir = Path(_env("TEMP_DIR", "temp/deployments"))
         audit_log = Path(_env("AUDIT_LOG", "temp/deployments.log"))
+        last_file = Path(_env("LAST_DEPLOYMENT_FILE", "temp/last-deployment.json"))
         return cls(
             app_host=_env("APP_HOST", "127.0.0.1"),
             app_port=_env_int("APP_PORT", 5002),
@@ -184,6 +190,7 @@ class Settings:
             temp_dir=temp_dir if temp_dir.is_absolute() else BASE_DIR / temp_dir,
             keep_temp_files=_env_bool("KEEP_TEMP_FILES", False),
             audit_log=audit_log if audit_log.is_absolute() else BASE_DIR / audit_log,
+            last_deployment_file=last_file if last_file.is_absolute() else BASE_DIR / last_file,
         )
 
     @property

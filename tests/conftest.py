@@ -228,6 +228,8 @@ def _apply_env(monkeypatch, tmp_path, **overrides) -> config.Settings:
         "DRY_RUN_CONNECT": "false",
         "TEMP_DIR": str(tmp_path / "deployments"),
         "AUDIT_LOG": str(tmp_path / "audit.log"),
+        # keep every file the app writes inside the test's own directory
+        "LAST_DEPLOYMENT_FILE": str(tmp_path / "last-deployment.json"),
         "INSTALLATION_HUB_URL": "http://hub.example.test:8081/api/installation-hubs/path",
         "INSTALLATION_CODE": "TEST-CODE-123",
         "SSH_KEY_PATH": str(tmp_path / "id_rsa"),

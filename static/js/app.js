@@ -51,6 +51,15 @@ const ui = {
     checksum: el('info-checksum'),
   },
   fetchCurrent: el('fetch-current'),
+  last: {
+    panel: el('last-deployment'),
+    status: el('last-status'),
+    service: el('last-service'),
+    jar: el('last-jar'),
+    checksum: el('last-checksum'),
+    finished: el('last-finished'),
+    error: el('last-error'),
+  },
   overlay: el('port-overlay'),
   conflictPort: el('conflict-port'),
   conflictList: el('conflict-list'),
@@ -229,6 +238,47 @@ async function fetchCurrentChecksum() {
   }
 }
 
+/* --------------------------------------------------------- last deployment */
+
+// Read back from disk rather than memory, so it survives an app restart —
+// after a failure the first question is usually "what did the last run do?".
+async function loadLastDeployment() {
+  let record = null;
+  try {
+    record = (await api('/api/deployment/last')).last;
+  } catch (error) {
+    return;
+  }
+  if (!record) {
+    ui.last.panel.hidden = true;
+    return;
+  }
+
+  const failed = record.status === 'failed';
+  ui.last.status.textContent = record.dry_run
+    ? 'DRY RUN'
+    : failed
+    ? 'FAILED'
+    : 'SUCCESS';
+  ui.last.status.className = 'pill ' + (record.dry_run ? 'dry' : failed ? 'failed' : 'success');
+
+  ui.last.service.textContent = record.display_name || '—';
+  ui.last.jar.textContent = record.jar || '—';
+  ui.last.checksum.textContent = record.checksum || '—';
+  ui.last.checksum.title = record.checksum || '';
+  ui.last.finished.textContent = (record.finished_at || '').replace('T', ' ') || '—';
+
+  if (failed && record.error) {
+    ui.last.error.textContent =
+      'Stopped at ' + (record.error_stage || '?').replace(/_/g, ' ') + ': ' + record.error;
+    ui.last.error.hidden = false;
+  } else {
+    ui.last.error.hidden = true;
+  }
+
+  ui.last.panel.hidden = false;
+}
+
 /* ------------------------------------------------------------------ boot */
 
 async function loadConfig() {
@@ -250,6 +300,7 @@ async function loadConfig() {
   ui.liveBadge.hidden = config.dry_run;
   refreshInfo();
   renderPipeline(null);
+  await loadLastDeployment();
 }
 
 /* -------------------------------------------------------------- websocket */
@@ -328,6 +379,7 @@ function finishDeployment(status, deploymentState) {
   ui.deployBtn.disabled = !state.verified;
   ui.deployBtn.textContent = 'Deploy';
   if (deploymentState) renderPipeline(deploymentState);
+  loadLastDeployment();
 
   if (status === 'success') {
     appendLog('='.repeat(52), 'success');

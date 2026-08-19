@@ -74,6 +74,20 @@
 
   <!-- ------------------------------------------------ right: pipeline + logs -->
   <section class="panel panel-wide">
+    <div class="last" id="last-deployment" hidden>
+      <div class="last-head">
+        <span class="panel-title">Last deployment</span>
+        <span class="pill" id="last-status"></span>
+      </div>
+      <dl class="last-facts">
+        <div><dt>Service</dt><dd id="last-service"></dd></div>
+        <div><dt>JAR</dt><dd class="mono" id="last-jar"></dd></div>
+        <div><dt>Checksum</dt><dd class="mono" id="last-checksum"></dd></div>
+        <div><dt>Finished</dt><dd class="mono" id="last-finished"></dd></div>
+      </dl>
+      <p class="last-error" id="last-error" hidden></p>
+    </div>
+
     <h2 class="panel-title">Pipeline</h2>
     <ol class="pipeline" id="pipeline"></ol>
 
