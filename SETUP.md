@@ -107,7 +107,7 @@ Restart the app (`Ctrl+C`, then `run.py` again) and deploy again.
 - the VDI can reach the server on port 22
 - the `day6sio` password works
 - `sudo` works
-- it can find `/etc/systemd/system/aiTXTTestMgmt.service` and the existing JAR
+- it can find `/etc/systemd/system/aiTXTestMgmt.service` and the existing JAR
 
 Still nothing is modified, uploaded, restarted or killed.
 

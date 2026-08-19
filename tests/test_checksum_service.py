@@ -75,13 +75,13 @@ def test_invalid_checksum_never_reaches_the_file(dry_settings):
 
 
 def test_unit_file_identity_is_verified():
-    verify_unit_is_expected(UNIT_FILE, "aiTXTTestMgmt.service", "tx-test-mgmt-1.6.0.jar")
+    verify_unit_is_expected(UNIT_FILE, "aiTXTestMgmt.service", "tx-test-mgmt-1.6.0.jar")
 
     with pytest.raises(ChecksumError, match="does not reference"):
-        verify_unit_is_expected(UNIT_FILE, "aiTXTTestMgmt.service", "ai-dap-app-1.6.0.jar")
+        verify_unit_is_expected(UNIT_FILE, "aiTXTestMgmt.service", "ai-dap-app-1.6.0.jar")
 
     with pytest.raises(ChecksumError, match="systemd unit"):
-        verify_unit_is_expected("just some text\n", "aiTXTTestMgmt.service")
+        verify_unit_is_expected("just some text\n", "aiTXTestMgmt.service")
 
 
 def test_replacement_is_idempotent():

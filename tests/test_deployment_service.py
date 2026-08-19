@@ -38,7 +38,7 @@ async def test_validation_reports_every_check(dry_settings):
     result = await service.validate("tx-test-mgmt", VALID_CHECKSUM)
     names = [check["name"] for check in result["checks"]]
     assert names == ["Service", "Checksum", "JAR", "Systemd unit", "Configuration"]
-    assert result["service"]["unit"] == "aiTXTTestMgmt.service"
+    assert result["service"]["unit"] == "aiTXTestMgmt.service"
     assert result["service"]["port"] == 8096
 
 
@@ -63,7 +63,7 @@ async def test_dry_run_completes_every_stage(dry_settings):
 
     assert state.status == "success"
     assert state.jar == "tx-test-mgmt-1.6.0.jar"
-    assert state.unit == "aiTXTTestMgmt.service"
+    assert state.unit == "aiTXTestMgmt.service"
     for stage in STAGES:
         assert state.stages[stage]["status"] == "completed", stage
 
@@ -79,7 +79,7 @@ async def test_dry_run_announces_actions_without_performing_them(dry_settings):
     assert "Would upload tx-test-mgmt-1.6.0.jar" in joined
     assert "Would update APP_CHECKSUM" in joined
     assert "Would execute: systemctl daemon-reload" in joined
-    assert "Would execute: systemctl restart aiTXTTestMgmt.service" in joined
+    assert "Would execute: systemctl restart aiTXTestMgmt.service" in joined
 
 
 async def test_a_failed_stage_stops_the_deployment(dry_settings):
@@ -97,11 +97,11 @@ async def test_a_failed_stage_stops_the_deployment(dry_settings):
 
 
 async def test_checksum_stage_writes_and_verifies(live_settings):
-    ssh = FakeSSH(live_settings, existing={"/etc/systemd/system/aiTXTTestMgmt.service"})
+    ssh = FakeSSH(live_settings, existing={"/etc/systemd/system/aiTXTestMgmt.service"})
     service = build(live_settings, ssh)
 
     result = await service.update_checksum("tx-test-mgmt", VALID_CHECKSUM)
-    written = ssh.written["/etc/systemd/system/aiTXTTestMgmt.service"]
+    written = ssh.written["/etc/systemd/system/aiTXTestMgmt.service"]
 
     assert result["new"] == VALID_CHECKSUM
     assert f'Environment="APP_CHECKSUM={VALID_CHECKSUM}"' in written
@@ -311,7 +311,7 @@ async def test_current_checksum_is_read_only(live_settings):
 async def test_checksum_stage_refuses_an_unexpected_unit_file(live_settings):
     ssh = FakeSSH(
         live_settings,
-        responses={"cat /etc/systemd/system/aiTXTTestMgmt.service": CommandResult("", 0, "hello\n", "")},
+        responses={"cat /etc/systemd/system/aiTXTestMgmt.service": CommandResult("", 0, "hello\n", "")},
     )
     service = build(live_settings, ssh)
 

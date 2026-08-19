@@ -192,7 +192,7 @@ Currently configured:
 
 | Key | Service | JAR | Unit | Port |
 |---|---|---|---|---|
-| `tx-test-mgmt` | TX Test Management | `tx-test-mgmt-1.6.0.jar` | `aiTXTTestMgmt.service` | 8096 |
+| `tx-test-mgmt` | TX Test Management | `tx-test-mgmt-1.6.0.jar` | `aiTXTestMgmt.service` | 8096 |
 | `ai-dap-app` | AI DAP App | `ai-dap-app-1.6.0.jar` | `aiDAPApp.service` | 80 |
 | `tx-integration-agent` | TX Integration Agent | `tx-integration-agent-1.6.0.jar` | `aiTXIntegrationAgent.service` | 9091 |
 
@@ -217,11 +217,11 @@ DRY RUN - no server file, service or process will be modified
 Would download: tx-test-mgmt-1.6.0.jar from the installation hub
 Would create backup directory: /home/AidenAI/binaries/backups/2026-08-14
 Would back up jar:  /home/AidenAI/binaries/tx-test-mgmt-1.6.0.jar -> .../backups/2026-08-14/...
-Would back up unit: /etc/systemd/system/aiTXTTestMgmt.service -> .../backups/2026-08-14/...
+Would back up unit: /etc/systemd/system/aiTXTestMgmt.service -> .../backups/2026-08-14/...
 Would upload tx-test-mgmt-1.6.0.jar to /home/AidenAI/binaries/tx-test-mgmt-1.6.0.jar
-Would update APP_CHECKSUM in /etc/systemd/system/aiTXTTestMgmt.service
+Would update APP_CHECKSUM in /etc/systemd/system/aiTXTestMgmt.service
 Would execute: systemctl daemon-reload
-Would execute: systemctl restart aiTXTTestMgmt.service
+Would execute: systemctl restart aiTXTestMgmt.service
 DRY RUN COMPLETE
 ```
 
@@ -257,8 +257,8 @@ its status and resumes the live logs.
 
 ```bash
 sudo cp /home/AidenAI/binaries/backups/2026-08-14/tx-test-mgmt-1.6.0.jar /home/AidenAI/binaries/
-sudo cp /home/AidenAI/binaries/backups/2026-08-14/aiTXTTestMgmt.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl restart aiTXTTestMgmt.service
+sudo cp /home/AidenAI/binaries/backups/2026-08-14/aiTXTestMgmt.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart aiTXTestMgmt.service
 ```
 
 ---

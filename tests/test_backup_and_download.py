@@ -11,7 +11,7 @@ from app.services.download_service import DownloadError, DownloadService
 from tests.conftest import FakeSSH
 
 JAR = "tx-test-mgmt-1.6.0.jar"
-UNIT = "aiTXTTestMgmt.service"
+UNIT = "aiTXTestMgmt.service"
 BIN_JAR = f"/home/AidenAI/binaries/{JAR}"
 UNIT_PATH = f"/etc/systemd/system/{UNIT}"
 BACKUP = "/home/AidenAI/binaries/backups"

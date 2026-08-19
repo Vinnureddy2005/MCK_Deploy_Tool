@@ -36,7 +36,7 @@ def test_all_configured_services_are_listed(dry_settings):
 @pytest.mark.parametrize(
     "key,jar,unit",
     [
-        ("tx-test-mgmt", "tx-test-mgmt-1.6.0.jar", "aiTXTTestMgmt.service"),
+        ("tx-test-mgmt", "tx-test-mgmt-1.6.0.jar", "aiTXTestMgmt.service"),
         ("ai-dap-app", "ai-dap-app-1.6.0.jar", "aiDAPApp.service"),
         ("tx-integration-agent", "tx-integration-agent-1.6.0.jar", "aiTXIntegrationAgent.service"),
     ],
@@ -156,7 +156,7 @@ def test_unit_must_belong_to_a_managed_service(dry_settings):
 
 def test_remote_paths_are_built_from_config(dry_settings):
     assert binaries_path("tx-test-mgmt-1.6.0.jar") == "/home/AidenAI/binaries/tx-test-mgmt-1.6.0.jar"
-    assert systemd_path("aiTXTTestMgmt.service") == "/etc/systemd/system/aiTXTTestMgmt.service"
+    assert systemd_path("aiTXTestMgmt.service") == "/etc/systemd/system/aiTXTestMgmt.service"
 
 
 # --- backup path generation ------------------------------------------------

@@ -51,7 +51,7 @@ SERVICES: dict[str, dict[str, Any]] = {
         # follow the JAR name, so each one is set explicitly.
         "log_file": "/var/www/webdav/txTestMgmt.log",
         "jar_prefix": "tx-test-mgmt",
-        "systemd_service": "aiTXTTestMgmt.service",
+        "systemd_service": "aiTXTestMgmt.service",
         "default_version": "1.6.0",
         "default_port": 8096,
     },
