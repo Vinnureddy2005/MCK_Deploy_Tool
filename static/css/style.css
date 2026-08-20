@@ -438,3 +438,36 @@ textarea.control { resize: vertical; word-break: break-all; font-family: var(--m
 }
 
 .target .btn { align-self: flex-start; }
+
+/* ---- confirmation and recovery ---- */
+
+.confirm, .runbook {
+  margin-top: 10px;
+  padding: 11px 13px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.confirm { background: var(--warn-wash); border: 1px solid var(--warn); }
+.runbook { background: var(--bad-wash); border: 1px solid var(--bad); }
+
+.confirm-title { margin: 0 0 6px; font-weight: 700; color: var(--warn); }
+.confirm-head { margin: 8px 0 3px; font-weight: 600; }
+.confirm-list { margin: 0 0 8px; padding-left: 18px; font-family: var(--mono); font-size: 12px; }
+.confirm-bad { color: var(--bad); font-weight: 700; }
+
+.runbook-title { margin: 0 0 8px; font-weight: 700; color: var(--bad); }
+
+.runbook-body {
+  margin: 0;
+  padding: 9px 11px;
+  background: #0f1729;
+  color: #d7e2f5;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}

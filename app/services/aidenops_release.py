@@ -13,6 +13,7 @@ it becomes one the day this serves several people.
 from __future__ import annotations
 
 import logging
+import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -111,6 +112,27 @@ def verify(local_path: str | Path, checksum: str) -> VerifiedRelease:
     )
     log.info("Verified %s (%s)", name, report["sha256"][:12])
     return _current
+
+
+def extract_member(release: VerifiedRelease, name: str, into) -> Path:
+    """Extract one already-verified member to a local path.
+
+    The migration scan needs the wheel as a file, and it reads it here rather
+    than on the server: the expensive part stays off the box, and the whole
+    computation is testable without one. Safe to extract because the member was
+    hashed against the archive's own SHA256SUMS.txt before this point.
+    """
+    known = {m["name"] for m in release.members}
+    if name not in known:
+        raise ReleaseError(f"{name} is not a verified member of {release.archive}.")
+
+    destination = Path(into) / name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(release.local_path) as zf, destination.open("wb") as handle:
+        with zf.open(name) as member:
+            while chunk := member.read(1024 * 1024):
+                handle.write(chunk)
+    return destination
 
 
 class ReleaseStager:

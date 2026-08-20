@@ -20,8 +20,13 @@ from pydantic import BaseModel, Field
 from app import config
 from app.config import ValidationError, validate_release_archive
 from app.services import aidenops_release, config_validator
+from app.services.aidenops_backend import (
+    BackendConfirmation,
+    BackendDeployer,
+    BackendError,
+)
 from app.services.aidenops_frontend import FrontendDeployer, FrontendError
-from app.services.aidenops_release import ReleaseError, ReleaseStager
+from app.services.aidenops_release import ReleaseError, ReleaseStager, extract_member
 from app.services.deployment_service import deployment_service
 from app.services.ssh_service import CommandFailed, SSHError
 
@@ -35,6 +40,9 @@ class VerifyRequest(BaseModel):
 
 class DeployRequest(BaseModel):
     target: str = Field(..., max_length=16)
+    # A destructive migration or a dependency change needs an explicit decision.
+    # The client re-posts with this set after the operator has seen what changes.
+    confirmed: bool = False
 
 
 def _handle(exc: Exception) -> HTTPException:
@@ -180,20 +188,13 @@ async def deploy(request: DeployRequest) -> dict:
             detail="No verified release. Verify an archive first.",
         )
 
-    if request.target == "ui":
-        if not release.contents.get("has_ui"):
-            raise HTTPException(status_code=400,
-                                detail="This release contains no UI bundle.")
-    elif request.target == "backend":
-        # Deliberately explicit rather than a stub that appears to work.
-        raise HTTPException(
-            status_code=501,
-            detail="The backend pipeline is not implemented yet. UI releases can "
-                   "be deployed now; the backend needs the dump and migration "
-                   "steps, which are still being built.",
-        )
-    else:
+    if request.target not in ("ui", "backend"):
         raise HTTPException(status_code=400, detail=f"Unknown target: {request.target}")
+
+    has = release.contents.get("has_ui" if request.target == "ui" else "has_backend")
+    if not has:
+        part = "UI bundle" if request.target == "ui" else "backend wheel"
+        raise HTTPException(status_code=400, detail=f"This release contains no {part}.")
 
     ssh = deployment_service.ssh
     broadcaster = deployment_service.broadcaster
@@ -201,22 +202,53 @@ async def deploy(request: DeployRequest) -> dict:
         await deployment_service.connect()
 
         if not release.staged_path:
-            stager = ReleaseStager(ssh, settings, emit=broadcaster.log)
+            stager = ReleaseStager(ssh, config.settings, emit=broadcaster.log)
             await stager.stage(release)
 
-        deployer = FrontendDeployer(ssh, settings, emit=broadcaster.log)
-        result = await deployer.deploy(release.contents["ui"])
+        if request.target == "ui":
+            deployer = FrontendDeployer(ssh, config.settings, emit=broadcaster.log)
+            result = await deployer.deploy(release.contents["ui"])
+            return {"target": "ui", "result": result}
+
+        # The wheel is read locally for the migration scan; only the current
+        # revision comes from the server.
+        wheel = extract_member(release, release.contents["wheel"], config.settings.temp_dir)
+        deployer = BackendDeployer(ssh, config.settings, emit=broadcaster.log)
+        result = await deployer.deploy(
+            release.contents["wheel"],
+            release.contents.get("requirements"),
+            wheel,
+            confirmed=request.confirmed,
+        )
+        return {"target": "backend", "result": result}
+
+    except BackendConfirmation as exc:
+        # 409, not an error: the deployment is paused awaiting a decision, and
+        # the client re-posts with confirmed once the operator has seen what
+        # would change.
+        raise HTTPException(
+            status_code=409,
+            detail={"needs_confirmation": True, "reason": exc.reason, **exc.detail},
+        ) from exc
+    except BackendError as exc:
+        # past_the_line means the service was started, so recovery needs the
+        # database and the runbook goes with the failure.
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": str(exc),
+                "stage": exc.stage,
+                "past_the_line": exc.past_the_line,
+                "runbook": exc.runbook,
+            },
+        ) from exc
     except FrontendError as exc:
-        # A reverted failure is reported as one: the previous bundle is back, so
-        # this is a failed deployment rather than a broken server.
         raise HTTPException(
             status_code=502,
             detail=f"{exc} (stage: {exc.stage}, reverted: {exc.reverted})",
         ) from exc
     except Exception as exc:
         raise _handle(exc) from exc
-
-    return {"target": "ui", "result": result}
 
 
 @router.post("/clear")

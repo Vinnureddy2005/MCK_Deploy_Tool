@@ -69,7 +69,18 @@
         var body = null;
         try { body = await response.json(); } catch (ignored) { /* no body */ }
         if (!response.ok) {
-            throw new Error((body && body.detail) || ("Request failed (" + response.status + ")"));
+            var detail = body && body.detail;
+            /* A confirmation and a failed deployment both carry structure rather
+               than just a sentence, so the raw detail travels with the error and
+               the caller can render the parts. */
+            var failure = new Error(
+                (typeof detail === "string" && detail) ||
+                (detail && detail.message) ||
+                ("Request failed (" + response.status + ")")
+            );
+            failure.status = response.status;
+            failure.detail = detail;
+            throw failure;
         }
         return body;
     }
@@ -207,9 +218,7 @@
         }
         if (release.contents.has_backend) {
             targetsHost.appendChild(target(
-                "backend", "Backend wheel", release.contents.wheel, preflightOk,
-                "Not implemented yet - the dump and migration steps are still " +
-                "being built. A UI-only release can be deployed now."));
+                "backend", "Backend wheel", release.contents.wheel, preflightOk, null));
         }
         if (!release.contents.has_ui && !release.contents.has_backend) {
             targetsHost.appendChild(el("p", "hint", "This release contains nothing deployable."));
@@ -238,25 +247,108 @@
         return card;
     }
 
-    async function deploy(targetKey, button) {
+    async function deploy(targetKey, button, confirmed) {
         clearError();
         button.disabled = true;
         var was = button.textContent;
         button.textContent = "Deploying…";
         try {
-            var body = await post("/deploy", { target: targetKey });
-            deployFacts.replaceChildren();
-            fact(deployFacts, "Deployed", body.result.tarball, true);
-            fact(deployFacts, "HTTP", body.result.checks.http_status, true);
-            fact(deployFacts, "API_URL", body.result.checks.api_url, true);
-            fact(deployFacts, "Previous bundle", body.result.previous, true);
-            deployFacts.hidden = false;
+            var body = await post("/deploy", { target: targetKey, confirmed: !!confirmed });
+            renderOutcome(targetKey, body.result);
         } catch (err) {
-            showError(err.message);
+            if (err.status === 409 && err.detail && err.detail.needs_confirmation) {
+                askToConfirm(targetKey, err.detail, button);
+            } else if (err.detail && err.detail.runbook) {
+                renderFailure(err.detail);
+            } else {
+                showError(err.message);
+            }
         } finally {
             button.disabled = false;
             button.textContent = was;
         }
+    }
+
+    function renderOutcome(targetKey, result) {
+        deployFacts.replaceChildren();
+        if (targetKey === "ui") {
+            fact(deployFacts, "Deployed", result.tarball, true);
+            fact(deployFacts, "HTTP", result.checks.http_status, true);
+            fact(deployFacts, "API_URL", result.checks.api_url, true);
+            fact(deployFacts, "Previous bundle", result.previous, true);
+        } else {
+            fact(deployFacts, "Installed", result.wheel, true);
+            fact(deployFacts, "Replaced version", result.previous_version || "unknown", true);
+            fact(deployFacts, "Migrations applied", String(result.migrations.count), true);
+            fact(deployFacts, "Dump",
+                 result.dump ? result.dump.path : "none taken \u2014 nothing was pending", true);
+            fact(deployFacts, "Health",
+                 result.health.status + " after " + result.health.waited + "s", true);
+        }
+        deployFacts.hidden = false;
+    }
+
+    /* A destructive migration or a dependency change cannot be undone by
+       reinstalling the previous wheel, so the operator sees exactly what would
+       change and is asked once - not per reason. */
+    function askToConfirm(targetKey, detail, button) {
+        var box = el("div", "confirm");
+        box.append(el("p", "confirm-title", detail.reason));
+
+        var migrations = (detail.migrations && detail.migrations.migrations) || [];
+        if (migrations.length) {
+            box.appendChild(el("p", "confirm-head",
+                migrations.length + " migration(s) will apply when the service starts:"));
+            var list = el("ul", "confirm-list");
+            migrations.forEach(function (revision) {
+                var item = el("li", null, revision.revision + "  " + revision.slug);
+                if (revision.destructive && revision.destructive.length) {
+                    item.appendChild(el("span", "confirm-bad",
+                        "  DESTRUCTIVE: " + revision.destructive.join(", ")));
+                }
+                list.appendChild(item);
+            });
+            box.appendChild(list);
+        }
+
+        var changes = (detail.dependencies && detail.dependencies.changes) || [];
+        if (changes.length) {
+            box.appendChild(el("p", "confirm-head", "Dependency changes:"));
+            var deps = el("ul", "confirm-list");
+            changes.forEach(function (change) {
+                deps.appendChild(el("li", null,
+                    change.change + ": " + change.package + " " +
+                    (change.from ? change.from + " -> " : "") + (change.to || "")));
+            });
+            box.appendChild(deps);
+        }
+
+        var go = el("button", "btn btn-primary", "I understand \u2014 deploy anyway");
+        go.type = "button";
+        go.addEventListener("click", function () {
+            box.remove();
+            deploy(targetKey, button, true);
+        });
+        box.appendChild(go);
+
+        deployFacts.hidden = true;
+        targetsHost.appendChild(box);
+    }
+
+    /* Past the start, recovery needs the database as well as the wheel - so the
+       tool hands over the exact sequence rather than running any of it. */
+    function renderFailure(detail) {
+        showError(detail.message + (detail.stage ? "  (stage: " + detail.stage + ")" : ""));
+        if (!detail.runbook || !detail.runbook.length) { return; }
+
+        var box = el("div", "runbook");
+        box.append(el("p", "runbook-title",
+            detail.past_the_line
+                ? "The service was started, so the schema may have changed. " +
+                  "Recovery is yours to decide - these are the exact steps:"
+                : "Recovery steps:"));
+        box.appendChild(el("pre", "runbook-body", detail.runbook.join("\n")));
+        targetsHost.appendChild(box);
     }
 
     /* ---------- the shared log socket ------------------------------------ */

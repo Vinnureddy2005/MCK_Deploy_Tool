@@ -174,14 +174,23 @@ def test_deploying_without_a_verified_release_is_refused(incoming):
     assert "Verify an archive first" in response.json()["detail"]
 
 
-def test_the_backend_target_says_it_is_not_built_yet(incoming):
-    """An honest 501 rather than a stub that appears to work."""
+def test_the_backend_target_is_accepted(incoming):
+    """It is implemented now, so it must not be refused as unavailable. Whatever
+    happens next is a server outcome, not a missing feature."""
     path = _archive(incoming)
     client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
 
     response = client.post("/api/aidenops/deploy", json={"target": "backend"})
-    assert response.status_code == 501
-    assert "not implemented yet" in response.json()["detail"]
+    assert response.status_code != 501
+
+
+def test_a_release_without_a_wheel_cannot_deploy_the_backend(incoming):
+    path = _archive(incoming, bodies={UI: BODIES[UI]})
+    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+
+    response = client.post("/api/aidenops/deploy", json={"target": "backend"})
+    assert response.status_code == 400
+    assert "no backend wheel" in response.json()["detail"]
 
 
 def test_a_release_without_a_ui_cannot_deploy_one(incoming):
