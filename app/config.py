@@ -172,6 +172,11 @@ class Settings:
     aidenops_keep_previous_dist: int = 1
     aidenops_keep_archives: int = 3
     aidenops_keep_dumps: int = 3
+    # Free space a deployment insists on. /home/AidenAI now holds the
+    # database, the dumps and the staged archive, so the tool filling it
+    # would stop PostgreSQL - which is the outage that already happened once
+    # on /var.
+    aidenops_disk_margin_mb: int = 1024
 
     checksum_pattern: str = r"^[a-fA-F0-9]{64}$"
 
@@ -235,6 +240,7 @@ class Settings:
             aidenops_keep_previous_dist=_env_int("AIDENOPS_KEEP_PREVIOUS_DIST", 1),
             aidenops_keep_archives=_env_int("AIDENOPS_KEEP_ARCHIVES", 3),
             aidenops_keep_dumps=_env_int("AIDENOPS_KEEP_DUMPS", 3),
+            aidenops_disk_margin_mb=_env_int("AIDENOPS_DISK_MARGIN_MB", 1024),
             remote_binaries_dir=_env("REMOTE_BINARIES_DIR", "/home/AidenAI/binaries"),
             remote_systemd_dir=_env("REMOTE_SYSTEMD_DIR", "/etc/systemd/system"),
             remote_copydata_dir=_env("REMOTE_COPYDATA_DIR", "/home/day6sio/CopyData"),

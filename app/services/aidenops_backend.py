@@ -195,11 +195,14 @@ class BackendDeployer:
         resolved = (data_dir.stdout or "").strip().splitlines()
         report["data_directory"] = resolved[0] if resolved else ""
 
-        for path in filter(None, [report["data_directory"], settings.aidenops_web_root]):
-            space = await self._run(["df", "-Pk", path], stage="preflight", check=False)
-            line = (space.stdout or "").strip().splitlines()
-            if len(line) > 1:
-                await self._log(f"  df {path}: {line[-1]}")
+        # A margin on every volume this deployment writes to. Logging the df
+        # output was not a check - it read like one, which is worse than not
+        # having it, because nobody re-reads a line that has always been fine.
+        margin_kb = max(0, settings.aidenops_disk_margin_mb) * 1024
+        for path in filter(None, [report["data_directory"],
+                                  settings.aidenops_backup_root,
+                                  settings.aidenops_web_root]):
+            await self._require_space(path, margin_kb, "the configured margin")
 
     async def _migrations(self, local_wheel_path, report: dict) -> dict:
         """What Alembic will apply, read from the wheel and the database.
@@ -287,6 +290,10 @@ class BackendDeployer:
         await self._log(f"Pruning old dumps to {keep - 1}")
         await self._prune(f"{backups}/*.sql.gz", keep - 1, stage="dump")
 
+        # Checked after pruning - which frees space - and before writing, when
+        # the size of the last dump is a real estimate of the next one.
+        await self._require_dump_space(backups)
+
         await self._log("Dumping the database")
         # pipefail matters: gzip succeeds on a truncated stream, so without it a
         # failed pg_dump produces a small valid .gz that would then be trusted.
@@ -328,6 +335,58 @@ class BackendDeployer:
         digits = (size.stdout or "").strip()
         return {"size": int(digits) if digits.isdigit() else None,
                 "complete": True}
+
+    async def _available_kb(self, path: str) -> int | None:
+        """Free space in 1K blocks, or None when it cannot be measured.
+
+        None is not treated as zero: a dry run cannot measure anything, and
+        refusing to deploy because a rehearsal could not read df would be a
+        false alarm.
+        """
+        result = await self._run(["df", "-Pk", path], stage="preflight", check=False)
+        lines = (result.stdout or "").strip().splitlines()
+        if result.simulated or len(lines) < 2:
+            return None
+        fields = lines[-1].split()
+        # Filesystem 1024-blocks Used Available Capacity Mounted-on
+        return int(fields[3]) if len(fields) > 3 and fields[3].isdigit() else None
+
+    async def _require_space(self, path: str, need_kb: int, why: str) -> None:
+        available = await self._available_kb(path)
+        if available is None:
+            await self._log(f"  {path}: free space not measurable here")
+            return
+        await self._log(f"  {path}: {available // 1024} MB free")
+        if available < need_kb:
+            raise BackendError(
+                "preflight",
+                f"{path} has {available // 1024} MB free but this deployment needs "
+                f"{need_kb // 1024} MB ({why}). Refusing to start: filling this "
+                "volume stops PostgreSQL for every database on the server.",
+            )
+
+    async def _require_dump_space(self, backups: str) -> None:
+        """Insist on room for the dump, sized from the last one."""
+        margin_kb = max(0, self.settings.aidenops_disk_margin_mb) * 1024
+
+        newest = await self._run(
+            ["sh", "-c", 'ls -1t $1 2>/dev/null | head -1', "sh", f"{backups}/*.sql.gz"],
+            stage="dump", check=False,
+        )
+        path = (newest.stdout or "").strip().splitlines()
+        previous_kb = 0
+        if path and not newest.simulated:
+            size = await self._run(["stat", "-c", "%s", path[0]], stage="dump", check=False)
+            digits = (size.stdout or "").strip()
+            if digits.isdigit():
+                # 1.2x, because the dataset grows between deployments.
+                previous_kb = int(int(digits) * 1.2) // 1024
+
+        await self._require_space(
+            backups, previous_kb + margin_kb,
+            f"{previous_kb // 1024} MB for the dump plus a "
+            f"{margin_kb // 1024} MB margin",
+        )
 
     async def _backup(self, suffix: str) -> str | None:
         """Keep the wheel being replaced - pip --force-reinstall discards it."""

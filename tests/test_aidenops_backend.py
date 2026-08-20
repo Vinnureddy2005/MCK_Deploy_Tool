@@ -74,7 +74,8 @@ def _wheel(tmp_path, revisions=(BASE, ADDITIVE)):
 
 class RecordingSSH:
     def __init__(self, *, current=CURRENT, freeze=FREEZE, required=FREEZE,
-                 health="200", dump_tail=DUMP_TAIL, fail_on=None):
+                 health="200", dump_tail=DUMP_TAIL, fail_on=None,
+                 avail_kb=33_554_432, previous_dump=""):
         self.commands: list[list[str]] = []
         self.sudo_users: list[str | None] = []
         self.current = current
@@ -83,6 +84,8 @@ class RecordingSSH:
         self.health = health
         self.dump_tail = dump_tail
         self.fail_on = fail_on or ()
+        self.avail_kb = avail_kb
+        self.previous_dump = previous_dump
 
     async def run(self, argv, *, sudo=False, run_as=None, stdin_data=None,
                   timeout=None, check=True):
@@ -111,9 +114,19 @@ class RecordingSSH:
         if "tail -5" in joined:
             return CommandResult(joined, 0, self.dump_tail, "")
         if argv[0] == "stat":
-            return CommandResult(joined, 0, "146800640", "")
+            return CommandResult(joined, 0, "146800640", "")  # ~140 MB
         if argv[0] == "df":
-            return CommandResult(joined, 0, "Filesystem\n/dev/x 50G 19G 32G 38% /home", "")
+            # A real `df -Pk` layout: the fourth field is Available in 1K
+            # blocks. The old fake returned "32G" there, which is not a digit,
+            # so the space check read it as unmeasurable and skipped itself.
+            return CommandResult(
+                joined, 0,
+                "Filesystem 1024-blocks Used Available Capacity Mounted-on\n"
+                f"/dev/mapper/datavg 52428800 100000 {self.avail_kb} 38% /home/AidenAI",
+                "",
+            )
+        if "head -1" in joined:
+            return CommandResult(joined, 0, self.previous_dump, "")
         if "show" in joined and "aidenops-service" in joined:
             return CommandResult(joined, 0, "Name: aidenops-service\nVersion: 1.0.9\n", "")
         return CommandResult(joined, 0, "", "")
@@ -420,3 +433,88 @@ async def test_the_runbook_says_no_restore_is_needed_when_no_dump_was_taken(fast
     runbook = "\n".join(caught.value.runbook)
     assert "DROP DATABASE" not in runbook
     assert "complete rollback" in runbook
+
+
+# --- disk space actually refuses ------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_nearly_full_volume_stops_the_deployment(fast, tmp_path):
+    """Logging df output was not a check. /home/AidenAI holds the database, the
+    dumps and the staged archive, so the tool filling it stops PostgreSQL."""
+    ssh = RecordingSSH(current=CURRENT, avail_kb=200 * 1024)   # 200 MB free
+
+    with pytest.raises(BackendError, match="Refusing to start"):
+        await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+
+    assert not ssh.ran("systemctl", "stop")
+    assert not ssh.ran("pg_dump")
+
+
+@pytest.mark.asyncio
+async def test_the_message_names_the_volume_and_both_numbers(fast, tmp_path):
+    ssh = RecordingSSH(current=CURRENT, avail_kb=200 * 1024)
+
+    with pytest.raises(BackendError) as caught:
+        await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+
+    message = str(caught.value)
+    assert "200 MB free" in message
+    assert "1024 MB" in message
+    assert "stops PostgreSQL" in message
+
+
+@pytest.mark.asyncio
+async def test_ample_space_proceeds(fast, tmp_path):
+    ssh = RecordingSSH(current=CURRENT, avail_kb=33_554_432)   # 32 GB
+    await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+    assert ssh.ran("pg_dump")
+
+
+@pytest.mark.asyncio
+async def test_the_dump_headroom_is_sized_from_the_previous_dump(fast, tmp_path):
+    """A 140 MB dump plus a 1 GB margin needs more than 1 GB free - so a volume
+    with only 1.1 GB is enough for the margin alone but not for the dump."""
+    ssh = RecordingSSH(
+        current=CURRENT,
+        avail_kb=1_150 * 1024,
+        previous_dump="/home/AidenAI/backups/db/aidenops-20260819-100000.sql.gz",
+    )
+
+    with pytest.raises(BackendError, match="for the dump plus"):
+        await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+
+    # It got past the margin check and failed on the dump-specific one.
+    assert ssh.ran("ls -1t", "*.sql.gz")
+    assert not ssh.ran("pg_dump")
+
+
+@pytest.mark.asyncio
+async def test_pruning_happens_before_the_space_check(fast, tmp_path):
+    """Pruning frees space, so checking first would refuse deployments that
+    would actually fit."""
+    ssh = RecordingSSH(current=CURRENT)
+    await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+
+    assert ssh.index_of("ls -1t", "*.sql.gz") < ssh.index_of("pg_dump")
+
+
+@pytest.mark.asyncio
+async def test_unmeasurable_space_is_not_treated_as_empty(dry_settings, tmp_path):
+    """A rehearsal cannot read df, and refusing because of that would be a false
+    alarm rather than a safeguard."""
+    import dataclasses
+
+    settings = dataclasses.replace(dry_settings, aidenops_health_timeout=2,
+                                   aidenops_health_interval=1)
+
+    class Unmeasurable(RecordingSSH):
+        async def run(self, argv, **kwargs):
+            result = await super().run(argv, **kwargs)
+            if argv and argv[0] == "df":
+                return CommandResult(" ".join(map(str, argv)), 0, "", "")
+            return result
+
+    ssh = Unmeasurable(current=CURRENT)
+    await _deployer(ssh, settings).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+    assert ssh.ran("pg_dump")
