@@ -136,6 +136,34 @@ class Settings:
     # Aug15 - the existing manual convention for dated folders.
     backup_date_format: str = "%b%d"
 
+    # ── AidenOps ────────────────────────────────────────────────────────────
+    # A different application on the same server: one app with two artifacts
+    # rather than a service with one JAR, and a database that migrates on every
+    # start. Paths are verified against the live box, not assumed.
+    aidenops_unit: str = "aidenops.service"
+    # /home/AidenAI/ops1, not ops - `ops` is a stale duplicate that is being
+    # deleted, and aidenops-api.service / aidenops-ui.service point at it.
+    # Restarting either reports success and changes nothing.
+    aidenops_ops_dir: str = "/home/AidenAI/ops1"
+    aidenops_venv: str = "/home/AidenAI/ops1/venv"
+    aidenops_staging_dir: str = "/home/AidenAI/ops1/staging"
+    aidenops_backup_root: str = "/home/AidenAI/backups"
+    aidenops_web_root: str = "/var/www/aidenops"
+    aidenops_health_url: str = "http://localhost:8000/health"
+    aidenops_ui_url: str = "http://localhost:8080/"
+    # The port does not open until Alembic finishes. The unit file's own comment
+    # puts a migration plus a dataset restore at up to ten minutes, so a refused
+    # connection is the expected early answer, not a failure.
+    aidenops_health_timeout: int = 600
+    aidenops_health_interval: int = 5
+    # One previous dist stays in place for an instant revert; older copies are
+    # pruned. Every path the tool writes to gets a retention policy in the same
+    # change that starts writing to it - three directories leaked before this
+    # rule existed.
+    aidenops_keep_previous_dist: int = 1
+    aidenops_keep_archives: int = 3
+    aidenops_keep_dumps: int = 3
+
     checksum_pattern: str = r"^[a-fA-F0-9]{64}$"
 
     log_tail_lines: int = 200

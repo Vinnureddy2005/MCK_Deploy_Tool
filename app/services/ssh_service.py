@@ -55,8 +55,20 @@ class CommandResult:
 READ_ONLY = {
     "ls", "cat", "stat", "test", "date", "lsof", "sha256sum", "md5sum",
     "readlink", "id", "whoami", "find", "grep", "tail", "head", "journalctl",
+    # Disk space has to be measured during a dry run too - refusing to deploy
+    # for lack of space is only possible if the check actually ran.
+    "df", "du", "getenforce", "gzip",
 }
 READ_ONLY_SYSTEMCTL = {"status", "is-active", "is-enabled", "show", "cat", "list-units"}
+
+
+# Commands whose binary can mutate but which are read-only in the exact form
+# this tool invokes them. Listing them matters for dry runs: a rehearsal is only
+# useful if it reflects the real server, so inspection must still happen.
+READ_ONLY_WITH_FLAG = {
+    "unzip": "-l",     # list an archive, never extract
+    "tar": "-tzf",     # list a tarball, never extract
+}
 
 
 def is_read_only(argv: Sequence[str]) -> bool:
@@ -65,6 +77,13 @@ def is_read_only(argv: Sequence[str]) -> bool:
     head = argv[0]
     if head == "systemctl":
         return len(argv) > 1 and argv[1] in READ_ONLY_SYSTEMCTL
+    if head in READ_ONLY_WITH_FLAG:
+        return READ_ONLY_WITH_FLAG[head] in argv[1:]
+    if head == "curl":
+        # A plain GET. Anything that can send a body or change the method is not
+        # read-only, so the presence of one of these disqualifies it.
+        mutating = {"-X", "--request", "-d", "--data", "-T", "--upload-file", "-F", "--form"}
+        return not mutating.intersection(argv[1:])
     return head in READ_ONLY
 
 
