@@ -156,6 +156,10 @@ class Settings:
     aidenops_incoming_dir: Path = field(default_factory=lambda: BASE_DIR / "incoming")
     aidenops_health_url: str = "http://localhost:8000/health"
     aidenops_ui_url: str = "http://localhost:8080/"
+    # nginx, not the app. Both observed UI failures on this server were
+    # diagnosed from the error log and were invisible in the AidenOps journal.
+    aidenops_nginx_error_log: str = "/var/log/nginx/error.log"
+    aidenops_nginx_access_log: str = "/var/log/nginx/access.log"
     # The port does not open until Alembic finishes. The unit file's own comment
     # puts a migration plus a dataset restore at up to ten minutes, so a refused
     # connection is the expected early answer, not a failure.
@@ -222,6 +226,10 @@ class Settings:
             aidenops_incoming_dir=incoming if incoming.is_absolute() else BASE_DIR / incoming,
             aidenops_health_url=_env("AIDENOPS_HEALTH_URL", "http://localhost:8000/health"),
             aidenops_ui_url=_env("AIDENOPS_UI_URL", "http://localhost:8080/"),
+            aidenops_nginx_error_log=_env("AIDENOPS_NGINX_ERROR_LOG",
+                                          "/var/log/nginx/error.log"),
+            aidenops_nginx_access_log=_env("AIDENOPS_NGINX_ACCESS_LOG",
+                                           "/var/log/nginx/access.log"),
             aidenops_health_timeout=_env_int("AIDENOPS_HEALTH_TIMEOUT", 600),
             aidenops_health_interval=_env_int("AIDENOPS_HEALTH_INTERVAL", 5),
             aidenops_keep_previous_dist=_env_int("AIDENOPS_KEEP_PREVIOUS_DIST", 1),

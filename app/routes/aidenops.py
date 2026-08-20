@@ -26,6 +26,7 @@ from app.services.aidenops_backend import (
     BackendError,
 )
 from app.services.aidenops_frontend import FrontendDeployer, FrontendError
+from app.services.aidenops_logs import AidenOpsLogStreamer
 from app.services.aidenops_release import ReleaseError, ReleaseStager, extract_member
 from app.services.deployment_service import deployment_service
 from app.services.ssh_service import CommandFailed, SSHError
@@ -249,6 +250,53 @@ async def deploy(request: DeployRequest) -> dict:
         ) from exc
     except Exception as exc:
         raise _handle(exc) from exc
+
+
+@router.post("/logs/start")
+async def start_logs() -> dict:
+    """Follow the AidenOps journal and both nginx logs.
+
+    Separate from a deployment on purpose: the most useful time to read these is
+    while investigating, not only while deploying.
+    """
+    try:
+        await deployment_service.connect()
+        streamer = _streamer()
+        await streamer.start()
+    except Exception as exc:
+        raise _handle(exc) from exc
+    return {"streaming": streamer.active, "unit": config.settings.aidenops_unit}
+
+
+@router.post("/logs/stop")
+async def stop_logs() -> dict:
+    await _streamer().stop()
+    return {"streaming": False}
+
+
+@router.get("/logs/recent")
+async def recent_logs(lines: int = 200) -> dict:
+    """A one-shot tail, for after a failure rather than during a deployment."""
+    try:
+        await deployment_service.connect()
+        text = await _streamer().recent(lines=max(1, min(lines, 2000)))
+    except Exception as exc:
+        raise _handle(exc) from exc
+    return {"text": text}
+
+
+_log_streamer: AidenOpsLogStreamer | None = None
+
+
+def _streamer() -> AidenOpsLogStreamer:
+    """One streamer for the process, so a second start replaces the first
+    rather than leaving orphaned channels following the same files."""
+    global _log_streamer
+    if _log_streamer is None:
+        _log_streamer = AidenOpsLogStreamer(
+            deployment_service.ssh, deployment_service.broadcaster, config.settings
+        )
+    return _log_streamer
 
 
 @router.post("/clear")
