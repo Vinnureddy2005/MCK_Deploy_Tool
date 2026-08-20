@@ -256,7 +256,18 @@ was being designed. That figure came from the shipped demo dataset (2.36M rows),
 which has never been loaded here. If it ever is, dumps grow accordingly and the
 retention count matters much more.
 
-### Two things on this server worth attention, unrelated to the tool
+### Two things on this server worth knowing - neither is a prerequisite
+
+**No AidenOps deployment depends on either of these.** Every path this tool
+writes to is on `/home/AidenAI`, which has 32 GB free. The only thing it puts on
+`/var` is the UI bundle at roughly 6 MB, against 1.5 GB free - so `/var` being
+tight does not threaten a deployment.
+
+They are here because `/var` also holds nginx's logs and journald, and
+`error.log` is where both real UI failures on this server were diagnosed. If
+`/var` ever fills you lose that, which costs you diagnosis rather than uptime.
+
+Housekeeping, in other words. Do it on a quiet afternoon or not at all.
 
 **`/var/lib/pgsql` still holds 5.2 GB.** That is the *old* data directory, from
 before PostgreSQL moved to `/home/AidenAI`. It is not in use —
