@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,9 @@ class CommandResult:
 
 # Commands that only read state. In dry-run these still execute, so a dry run
 # exercises connectivity, permissions and file discovery for real.
+# A sudo target user. Narrow on purpose: this value reaches a command line.
+_USER_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+
 READ_ONLY = {
     "ls", "cat", "stat", "test", "date", "lsof", "sha256sum", "md5sum",
     "readlink", "id", "whoami", "find", "grep", "tail", "head", "journalctl",
@@ -199,20 +203,33 @@ class SSHService:
 
     # -- command execution --------------------------------------------------
 
-    def _build(self, argv: Sequence[str], sudo: bool) -> str:
+    def _build(self, argv: Sequence[str], sudo: bool, run_as: str | None = None) -> str:
+        """Wrap a command in sudo, optionally targeting another user.
+
+        `run_as` exists so `pg_dump` can run as postgres in one sudo rather than
+        two nested ones. Nested sudo works but doubles the entries in
+        /var/log/sudo.log - and at a five-second health poll for up to ten
+        minutes that is a hundred-odd lines per deployment, on a /var that is
+        already near full.
+        """
         command = shlex.join(argv)
+        if run_as and not _USER_NAME.match(run_as):
+            raise SSHError(f"Refusing to use unsafe sudo user: {run_as!r}")
+
         if not sudo or not self.settings.use_sudo:
             return command
+        target = f"-u {run_as} " if run_as else ""
         if self.settings.sudo_password:
             # -S reads the password from stdin; -p '' suppresses the prompt.
-            return f"sudo -S -p '' {command}"
-        return f"sudo -n {command}"
+            return f"sudo -S -p '' {target}{command}"
+        return f"sudo -n {target}{command}"
 
     async def run(
         self,
         argv: Sequence[str],
         *,
         sudo: bool = False,
+        run_as: str | None = None,
         stdin_data: str | None = None,
         timeout: int | None = None,
         check: bool = True,
@@ -223,7 +240,9 @@ class SSHService:
         still run so a dry run reflects the real server state.
         """
         argv = [str(a) for a in argv]
-        command = self._build(argv, sudo)
+        command = self._build(argv, sudo, run_as)
+        # Running as another user is still privileged, so a read-only
+        # command targeted at postgres is not simulated away in a dry run.
         read_only = is_read_only(argv)
 
         if self.settings.dry_run and not read_only:
