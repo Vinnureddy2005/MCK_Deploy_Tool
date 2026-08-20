@@ -1,5 +1,9 @@
 # McKesson Deployment Tool
 
+> **AidenOps** is deployed from a separate page and documented separately:
+> see [AIDENOPS.md](AIDENOPS.md). Nothing in this document applies to it.
+
+
 Local deployment automation that runs **only inside the McKesson VDI laptop**.
 
 It replaces the manual WinSCP + PuTTY deployment of the Aiden Java services onto
