@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AidenOps — McKesson Deployment Tool</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark brand-mark--ops">OPS</span>
+    <div>
+      <h1>AidenOps</h1>
+      <p class="brand-sub" id="target-host">Loading configuration&hellip;</p>
+    </div>
+  </div>
+  <nav class="navlinks">
+    <a class="navlink" href="/">TX-PROJECTS</a>
+    <span class="navlink navlink-on" aria-current="page">AidenOps</span>
+  </nav>
+  <div class="badges">
+    <span class="badge badge-dry" id="mode-badge" hidden>DRY RUN</span>
+    <span class="badge badge-live" id="live-badge" hidden>LIVE DEPLOYMENT</span>
+    <span class="badge badge-conn" id="socket-badge">connecting&hellip;</span>
+  </div>
+</header>
+
+<!-- stage bar: fills as each stage completes -->
+<ol class="stepper" id="stepper">
+  <li class="stepper-item" data-stage="1">
+    <span class="stepper-dot">1</span><span class="stepper-label">Verify</span>
+  </li>
+  <li class="stepper-item" data-stage="2">
+    <span class="stepper-dot">2</span><span class="stepper-label">Check the server</span>
+  </li>
+  <li class="stepper-item" data-stage="3">
+    <span class="stepper-dot">3</span><span class="stepper-label">Deploy</span>
+  </li>
+</ol>
+
+<section class="notice notice-bad" id="error" hidden role="alert">
+  <p class="notice-title" id="error-message"></p>
+</section>
+
+<main class="layout-ops">
+
+  <!-- ═══ stage 1 ═══════════════════════════════════════════════════════ -->
+  <section class="panel ops-panel" id="panel-1">
+    <h2 class="panel-title">Verify the release</h2>
+    <p class="hint">
+      Nothing is sent to the server in this stage. The archive is hashed here and
+      checked against its own <code>SHA256SUMS.txt</code>.
+    </p>
+
+    <label class="field-label" for="archive">Archive</label>
+    <select id="archive" class="control"></select>
+    <p class="hint" id="incoming-hint"></p>
+
+    <label class="field-label" for="checksum">Code from the Aiden tool</label>
+    <input id="checksum" class="control mono" autocomplete="off" spellcheck="false"
+           placeholder="64 hex characters, spaces are fine">
+
+    <button type="button" class="btn btn-primary" id="verify">Verify</button>
+  </section>
+
+  <!-- ═══ stage 2 ═══════════════════════════════════════════════════════ -->
+  <section class="panel ops-panel" id="panel-2" hidden>
+    <h2 class="panel-title">What this release contains</h2>
+    <dl class="facts" id="release-facts"></dl>
+
+    <h3 class="sub-title">Server checks</h3>
+    <ul class="checklist" id="preflight"></ul>
+
+    <button type="button" class="btn btn-primary" id="run-preflight">Check the server</button>
+    <button type="button" class="btn btn-ghost" id="back-to-1">Choose another archive</button>
+  </section>
+
+  <!-- ═══ stage 3 ═══════════════════════════════════════════════════════ -->
+  <section class="panel ops-panel" id="panel-3" hidden>
+    <h2 class="panel-title">Deploy</h2>
+    <div id="targets"></div>
+    <p class="hint">
+      The UI bundle is uploaded, extracted beside the live copy, configured, then
+      swapped in. If it does not serve correctly afterwards it reverts itself.
+    </p>
+    <dl class="facts" id="deploy-facts" hidden></dl>
+  </section>
+
+  <!-- live log, shared with the TX-PROJECTS page over the same socket -->
+  <section class="panel panel-log">
+    <h2 class="panel-title">Live log</h2>
+    <pre class="logbox" id="log"></pre>
+  </section>
+
+</main>
+
+<script src="/static/js/aidenops.js"></script>
+</body>
+</html>

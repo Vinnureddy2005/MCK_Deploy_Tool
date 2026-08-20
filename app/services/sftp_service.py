@@ -151,6 +151,74 @@ class SFTPService:
 
         raise UploadError(f"Could not upload {filename} to {remote}: {last_error}")
 
+    async def upload_release(
+        self,
+        local_path: Path,
+        remote_dir: str,
+        filename: str,
+        *,
+        progress: ProgressHook = None,
+    ) -> UploadResult:
+        """Upload a release archive into a directory, with the same guarantees.
+
+        Same `.part` then promote as the JAR path: a transfer cut halfway never
+        leaves a plausible-looking short file under the final name. The caller
+        still re-hashes on the server afterwards - a matching size proves
+        nothing about the bytes.
+        """
+        remote = f"{remote_dir}/{filename}"
+        partial = f"{remote}.part"
+
+        if self.settings.dry_run:
+            return UploadResult(
+                filename=filename,
+                staged_path=remote,
+                remote_path=remote,
+                size_bytes=Path(local_path).stat().st_size if Path(local_path).exists() else 0,
+                simulated=True,
+            )
+
+        local_path = Path(local_path)
+        if not local_path.is_file():
+            raise UploadError(f"Local archive not found: {local_path}")
+        local_size = local_path.stat().st_size
+
+        last_error: Exception | None = None
+        for attempt in range(1, UPLOAD_RETRIES + 2):
+            try:
+                await self.ensure_user_dir(remote_dir)
+                sftp = await self.ssh.ensure_sftp()
+
+                await self._put(sftp, local_path, partial, local_size, progress)
+                await self._verify_size(partial, local_size)
+                await self._promote(partial, remote)
+                await self._verify_size(remote, local_size)
+
+                await self.ssh.close_sftp()
+                logger.info("Uploaded %s -> %s (%d bytes)", local_path.name, remote, local_size)
+                return UploadResult(
+                    filename=filename,
+                    staged_path=remote,
+                    remote_path=remote,
+                    size_bytes=local_size,
+                    attempts=attempt,
+                )
+            except CONNECTION_ERRORS as exc:
+                last_error = exc
+                logger.warning("Upload attempt %d failed: %s", attempt, exc)
+                await self._discard_partial(partial)
+                if attempt > UPLOAD_RETRIES:
+                    break
+                if progress:
+                    await progress(f"Upload failed ({exc}) - reconnecting and retrying once")
+                try:
+                    await self.ssh.reset_connection()
+                except SSHError as reconnect_error:
+                    last_error = reconnect_error
+                    break
+
+        raise UploadError(f"Could not upload {filename} to {remote}: {last_error}")
+
     async def _put(
         self,
         sftp: paramiko.SFTPClient,

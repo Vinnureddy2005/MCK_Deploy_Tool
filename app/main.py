@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import BASE_DIR, ValidationError, settings
+from app.routes import aidenops as aidenops_routes
 from app.routes import deployment as deployment_routes, websocket as websocket_routes
 from app.services.deployment_service import deployment_service
 
@@ -53,6 +54,7 @@ app = FastAPI(
 )
 
 app.include_router(deployment_routes.router)
+app.include_router(aidenops_routes.router)
 app.include_router(websocket_routes.router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -75,3 +77,13 @@ async def health() -> dict:
         "ssh_connected": deployment_service.ssh.connected,
         "deployment_status": deployment_service.state.status,
     }
+
+
+@app.get("/aidenops", include_in_schema=False)
+async def aidenops_page() -> FileResponse:
+    """The AidenOps screen. A separate page, not a tab on the TX-PROJECTS one.
+
+    The two flows answer different questions and share no state, so a single
+    screen would always be half irrelevant.
+    """
+    return FileResponse(STATIC_DIR / "aidenops.html")

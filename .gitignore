@@ -6,3 +6,6 @@ temp/
 venv/
 .venv/
 .pytest_cache/
+
+# Release archives dropped here for the AidenOps flow (multi-MB, not source).
+incoming/

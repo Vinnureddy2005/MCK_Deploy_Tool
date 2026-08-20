@@ -149,6 +149,11 @@ class Settings:
     aidenops_staging_dir: str = "/home/AidenAI/ops1/staging"
     aidenops_backup_root: str = "/home/AidenAI/backups"
     aidenops_web_root: str = "/var/www/aidenops"
+    # Where release archives are dropped on the VDI. A folder listing rather
+    # than a browser upload: multipart would add python-multipart to this
+    # tool's dependencies, on a machine whose PyPI access is exactly the
+    # thing we cannot rely on.
+    aidenops_incoming_dir: Path = field(default_factory=lambda: BASE_DIR / "incoming")
     aidenops_health_url: str = "http://localhost:8000/health"
     aidenops_ui_url: str = "http://localhost:8080/"
     # The port does not open until Alembic finishes. The unit file's own comment
@@ -183,6 +188,9 @@ class Settings:
         temp_dir = Path(_env("TEMP_DIR", "temp/deployments"))
         audit_log = Path(_env("AUDIT_LOG", "temp/deployments.log"))
         last_file = Path(_env("LAST_DEPLOYMENT_FILE", "temp/last-deployment.json"))
+        # Resolved against BASE_DIR like the other paths: the working
+        # directory a service is started from is not something to depend on.
+        incoming = Path(_env("AIDENOPS_INCOMING_DIR", "incoming"))
         return cls(
             app_host=_env("APP_HOST", "127.0.0.1"),
             app_port=_env_int("APP_PORT", 5002),
@@ -205,6 +213,20 @@ class Settings:
             installation_code=_env("INSTALLATION_CODE"),
             download_timeout=_env_int("DOWNLOAD_TIMEOUT", 300),
             verify_jar_checksum=_env_bool("VERIFY_JAR_CHECKSUM", True),
+            aidenops_unit=_env("AIDENOPS_UNIT", "aidenops.service"),
+            aidenops_ops_dir=_env("AIDENOPS_OPS_DIR", "/home/AidenAI/ops1"),
+            aidenops_venv=_env("AIDENOPS_VENV", "/home/AidenAI/ops1/venv"),
+            aidenops_staging_dir=_env("AIDENOPS_STAGING_DIR", "/home/AidenAI/ops1/staging"),
+            aidenops_backup_root=_env("AIDENOPS_BACKUP_ROOT", "/home/AidenAI/backups"),
+            aidenops_web_root=_env("AIDENOPS_WEB_ROOT", "/var/www/aidenops"),
+            aidenops_incoming_dir=incoming if incoming.is_absolute() else BASE_DIR / incoming,
+            aidenops_health_url=_env("AIDENOPS_HEALTH_URL", "http://localhost:8000/health"),
+            aidenops_ui_url=_env("AIDENOPS_UI_URL", "http://localhost:8080/"),
+            aidenops_health_timeout=_env_int("AIDENOPS_HEALTH_TIMEOUT", 600),
+            aidenops_health_interval=_env_int("AIDENOPS_HEALTH_INTERVAL", 5),
+            aidenops_keep_previous_dist=_env_int("AIDENOPS_KEEP_PREVIOUS_DIST", 1),
+            aidenops_keep_archives=_env_int("AIDENOPS_KEEP_ARCHIVES", 3),
+            aidenops_keep_dumps=_env_int("AIDENOPS_KEEP_DUMPS", 3),
             remote_binaries_dir=_env("REMOTE_BINARIES_DIR", "/home/AidenAI/binaries"),
             remote_systemd_dir=_env("REMOTE_SYSTEMD_DIR", "/etc/systemd/system"),
             remote_copydata_dir=_env("REMOTE_COPYDATA_DIR", "/home/day6sio/CopyData"),
@@ -244,6 +266,9 @@ def reload_settings() -> Settings:
 _VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){0,3}(?:-[A-Za-z0-9.]+)?$")
 _JAR_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.jar$")
 _UNIT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]*\.service$")
+# A release archive: aidenops-d00222c-635405c.zip. `+` is permitted because
+# artifact names inside carry PEP 440 local versions.
+_ARCHIVE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*\.zip$")
 
 
 def list_services() -> list[dict[str, Any]]:
@@ -453,3 +478,11 @@ def validate_log_path(path: str) -> str:
     if not _LOG_PATH_RE.match(path) or ".." in path:
         raise ValidationError(f"Invalid log file path: {path!r}")
     return path
+
+
+def validate_release_archive(name: str) -> str:
+    """The archive filename, checked before it reaches a remote command line."""
+    candidate = (name or "").strip()
+    if not candidate or ".." in candidate or not _ARCHIVE_RE.match(candidate):
+        raise ValidationError(f"Refusing to use unsafe archive name: {name!r}")
+    return candidate

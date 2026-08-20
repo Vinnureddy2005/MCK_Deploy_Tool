@@ -260,3 +260,181 @@ textarea.control { resize: vertical; word-break: break-all; font-family: var(--m
 .conflict-row span:nth-child(odd) { color: var(--ink-faint); }
 .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
 .modal-actions .btn { margin-top: 0; }
+
+/* ================================================================ AidenOps
+   A separate page. Shares the tokens and the panel shell; shares no layout
+   with the deployment pipeline, which has nothing in common with this flow.
+   All selectors are new names so they cannot collide with the rules above. */
+
+/* Author display rules beat the user-agent [hidden] rule regardless of
+   specificity, so any element given both a layout class and the hidden
+   attribute stays laid out. State it once. */
+[hidden] { display: none !important; }
+
+.brand-mark--ops { background: var(--ok); }
+
+.navlinks { display: flex; align-items: center; gap: 6px; }
+
+.navlink {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.navlink:hover { background: var(--brand-wash); color: var(--brand-dark); }
+
+.navlink-on {
+  background: var(--brand-wash);
+  border-color: var(--brand);
+  color: var(--brand-dark);
+  cursor: default;
+}
+
+/* ---- stage bar ---- */
+
+.stepper {
+  display: flex;
+  align-items: center;
+  margin: 12px 22px 0;
+  padding: 12px 18px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+
+.stepper-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-faint);
+}
+
+.stepper-item + .stepper-item::before {
+  content: "";
+  flex: 1;
+  height: 2px;
+  background: var(--line-firm);
+  margin: 0 12px;
+}
+
+.stepper-item.is-done + .stepper-item::before,
+.stepper-item.is-current + .stepper-item::before { background: var(--ok); }
+
+.stepper-dot {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--line-firm);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stepper-label { font-size: 13px; font-weight: 600; white-space: nowrap; }
+
+.stepper-item.is-current { color: var(--brand-dark); }
+.stepper-item.is-current .stepper-dot {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #fff;
+}
+
+.stepper-item.is-done { color: var(--ok); }
+.stepper-item.is-done .stepper-dot {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: #fff;
+  font-size: 0;
+}
+.stepper-item.is-done .stepper-dot::after { content: "\2713"; font-size: 14px; line-height: 1; }
+
+@media (max-width: 640px) {
+  .stepper-label { display: none; }
+  .stepper-item { flex: none; }
+}
+
+/* ---- layout ---- */
+
+.layout-ops {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 22px 22px;
+  align-items: start;
+}
+
+@media (max-width: 900px) { .layout-ops { grid-template-columns: 1fr; } }
+
+.ops-panel { display: flex; flex-direction: column; gap: 10px; }
+
+.sub-title {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ---- server checks ---- */
+
+.checklist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+
+.check {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.check:first-child { border-top: none; }
+.check-name { font-weight: 600; }
+.check-detail { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
+.check-ok .check-name { color: var(--ok); }
+.check-bad .check-name { color: var(--bad); }
+
+.check-warn {
+  grid-column: 2;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--warn);
+}
+
+/* ---- deploy targets ---- */
+
+.target {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+}
+
+.target:first-child { border-top: none; padding-top: 0; }
+.target-label { margin: 0; font-size: 13px; font-weight: 700; }
+.target-file { margin: 0; font-size: 12px; overflow-wrap: anywhere; color: var(--ink-soft); }
+
+.notice-inline {
+  margin: 0;
+  padding: 7px 10px;
+  background: var(--warn-wash);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--warn);
+}
+
+.target .btn { align-self: flex-start; }
