@@ -141,6 +141,88 @@ class DownloadService:
             sha256=digest.hexdigest(),
         )
 
+    async def download_bundle(self, destination: Path) -> DownloadResult:
+        """Fetch the AidenOps release bundle from the hub.
+
+        The same request the JAR path makes - the hub takes a filename and a
+        code, and only the filename differs. Written as a sibling rather than a
+        branch inside download() because that one is built around a service key
+        and a version, neither of which exists here: there is one bundle name.
+
+        Downloads to `.part` and renames, so an interrupted transfer never leaves
+        a plausible-looking short file under the name the verifier will read.
+        """
+        name = self.settings.aidenops_bundle_name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        # Built before the dry-run branch on purpose. It does no I/O - it only
+        # constructs and validates - so a rehearsal proves the hub settings are
+        # present rather than skipping the one check it could have made.
+        url = self.build_url(name)
+
+        if self.settings.dry_run:
+            return DownloadResult(
+                filename=name, path=destination, size_bytes=0, sha256="", simulated=True
+            )
+        partial = destination.with_suffix(destination.suffix + ".part")
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.settings.download_timeout, follow_redirects=True
+            ) as client:
+                async with client.stream("GET", url) as response:
+                    if response.status_code == 404:
+                        raise DownloadError(
+                            f"filename={name} was not found on the installation hub "
+                            "(HTTP 404). The Aiden tool may not have published this "
+                            "release yet."
+                        )
+                    if response.status_code in (401, 403):
+                        raise DownloadError(
+                            f"Installation hub rejected the request "
+                            f"(HTTP {response.status_code}). Check INSTALLATION_CODE."
+                        )
+                    if response.status_code >= 400:
+                        raise DownloadError(
+                            f"Installation hub returned HTTP {response.status_code} for {name}"
+                        )
+                    with partial.open("wb") as handle:
+                        async for chunk in response.aiter_bytes(64 * 1024):
+                            handle.write(chunk)
+                            digest.update(chunk)
+                            size += len(chunk)
+        except httpx.TimeoutException as exc:
+            partial.unlink(missing_ok=True)
+            raise DownloadError(
+                f"Download timed out after {self.settings.download_timeout}s: "
+                f"{self.redact(url)}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            partial.unlink(missing_ok=True)
+            raise DownloadError(f"Could not reach the installation hub: {exc}") from exc
+        except OSError as exc:
+            partial.unlink(missing_ok=True)
+            raise DownloadError(f"Could not write {partial}: {exc}") from exc
+
+        if size == 0:
+            partial.unlink(missing_ok=True)
+            raise DownloadError(f"Downloaded {name} is empty")
+        # Same check as the JAR path, and for the same reason: a hub error page
+        # arrives with HTTP 200 and would otherwise be verified as an archive.
+        if not self._looks_like_jar(partial):
+            partial.unlink(missing_ok=True)
+            raise DownloadError(
+                f"Downloaded {name} is not a zip archive. The hub likely returned "
+                "an error page."
+            )
+
+        partial.replace(destination)
+        logger.info("Downloaded %s (%d bytes) from the hub", name, size)
+        return DownloadResult(
+            filename=name, path=destination, size_bytes=size, sha256=digest.hexdigest()
+        )
+
     @staticmethod
     def _looks_like_jar(path: Path) -> bool:
         """A JAR is a ZIP: it must start with the local-file-header magic."""

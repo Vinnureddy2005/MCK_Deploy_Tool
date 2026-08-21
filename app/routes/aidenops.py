@@ -28,6 +28,7 @@ from app.services.aidenops_backend import (
 from app.services.aidenops_frontend import FrontendDeployer, FrontendError
 from app.services.aidenops_logs import AidenOpsLogStreamer
 from app.services.aidenops_release import ReleaseError, ReleaseStager, extract_member
+from app.services.download_service import DownloadError, DownloadService
 from app.services.deployment_service import deployment_service
 from app.services.ssh_service import CommandFailed, SSHError
 
@@ -48,7 +49,8 @@ class DeployRequest(BaseModel):
 
 
 def _handle(exc: Exception) -> HTTPException:
-    if isinstance(exc, (ValidationError, ReleaseError, config_validator.ConfigError)):
+    if isinstance(exc, (ValidationError, ReleaseError, DownloadError,
+                        config_validator.ConfigError)):
         return HTTPException(status_code=400, detail=str(exc))
     if isinstance(exc, (FrontendError, SSHError, CommandFailed)):
         return HTTPException(status_code=502, detail=str(exc))
@@ -98,6 +100,35 @@ async def bundle() -> dict:
         "present": True,
         "size": stat.st_size,
         "modified": int(stat.st_mtime),
+    }
+
+
+@router.post("/fetch")
+async def fetch() -> dict:
+    """Download the bundle from the installation hub into the incoming folder.
+
+    The same request the JAR path makes - the hub takes a filename and a code,
+    and only the filename differs. Optional: copying the file in by hand lands
+    it in the same place, and everything after this point is identical either
+    way.
+
+    The hash is deliberately not checked here. This only puts bytes on disk; the
+    gate is Verify, which is where the code you carried across is compared.
+    """
+    settings = config.settings
+    incoming = settings.aidenops_incoming_dir
+    destination = incoming / settings.aidenops_bundle_name
+
+    try:
+        result = await DownloadService(settings).download_bundle(destination)
+    except Exception as exc:
+        raise _handle(exc) from exc
+
+    return {
+        "name": result.filename,
+        "size": result.size_bytes,
+        "simulated": result.simulated,
+        "incoming_dir": str(incoming),
     }
 
 

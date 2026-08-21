@@ -240,3 +240,68 @@ def test_no_hash_appears_in_the_page_before_anything_is_verified():
     import re
 
     assert not re.search(r"[0-9a-f]{32,}", client.get("/aidenops").text)
+
+
+# --- fetching from the hub -------------------------------------------------
+
+
+def test_the_hub_request_uses_the_bundle_name(incoming, monkeypatch):
+    """Same request the JAR path makes; only the filename differs."""
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "http://hub.invalid/api/path")
+    monkeypatch.setenv("INSTALLATION_CODE", "test-code")
+    config.reload_settings()
+
+    from app.services.download_service import DownloadService
+
+    url = DownloadService(config.settings).build_url(config.settings.aidenops_bundle_name)
+    assert "filename=opsBinaries.zip" in url
+    assert "code=test-code" in url
+
+
+def test_the_code_is_never_in_a_redacted_url(incoming, monkeypatch):
+    """It is a credential, and URLs get logged."""
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "http://hub.invalid/api/path")
+    monkeypatch.setenv("INSTALLATION_CODE", "super-secret-code")
+    config.reload_settings()
+
+    from app.services.download_service import DownloadService
+
+    d = DownloadService(config.settings)
+    assert "super-secret-code" not in DownloadService.redact(
+        d.build_url(config.settings.aidenops_bundle_name)
+    )
+
+
+def test_fetching_without_a_hub_configured_is_a_client_error(incoming, monkeypatch):
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "")
+    config.reload_settings()
+
+    response = client.post("/api/aidenops/fetch")
+    assert response.status_code == 400
+    assert "INSTALLATION_HUB_URL" in response.json()["detail"]
+
+
+def test_a_dry_run_does_not_write_the_bundle(incoming, monkeypatch):
+    """A rehearsal must not leave a zero-byte file where the verifier looks."""
+    monkeypatch.setenv("INSTALLATION_HUB_URL", "http://hub.invalid/api/path")
+    monkeypatch.setenv("INSTALLATION_CODE", "test-code")
+    monkeypatch.setenv("DRY_RUN", "true")
+    config.reload_settings()
+
+    body = client.post("/api/aidenops/fetch").json()
+    assert body["simulated"] is True
+    assert not (incoming / "opsBinaries.zip").exists()
+
+
+def test_an_error_page_is_not_accepted_as_an_archive(tmp_path):
+    """The hub answers with 200 and HTML when something is wrong, which would
+    otherwise be handed to the verifier as a zip."""
+    from app.services.download_service import DownloadService
+
+    page = tmp_path / "not-a-zip"
+    page.write_bytes(b"<html><body>Unauthorized</body></html>")
+    assert DownloadService._looks_like_jar(page) is False
+
+    real = tmp_path / "looks-like-one"
+    real.write_bytes(b"PK\x03\x04rest")
+    assert DownloadService._looks_like_jar(real) is True

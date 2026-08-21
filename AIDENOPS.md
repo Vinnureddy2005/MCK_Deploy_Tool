@@ -34,9 +34,15 @@ reinstalling the previous wheel does not undo a migration.
 opsBinaries.zip
 ```
 
-Copy it into the tool's `incoming/` folder on the VDI. The page shows the file it
-found with its size and the time it was copied — there is nothing to choose, and
-no path to type.
+Get it into the tool's `incoming/` folder on the VDI, either way:
+
+- press **Download from hub** on the page — the same request the JAR path makes,
+  with `filename=opsBinaries.zip` and the `INSTALLATION_CODE` already in `.env`
+- or copy the file in by hand
+
+Both land it in the same place and everything after that point is identical. The
+page shows the file it found with its size and when it arrived — nothing to
+choose, no path to type.
 
 The fixed name keeps the hub URL constant and matches the handover bundle
 already on that server. It also means **the filename identifies nothing**: every

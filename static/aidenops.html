@@ -56,7 +56,10 @@
 
     <label class="field-label">Release bundle</label>
     <div class="bundle" id="bundle">Looking for the bundle&hellip;</div>
-    <p class="hint" id="incoming-hint"></p>
+    <div class="bundle-actions">
+      <button type="button" class="btn btn-ghost" id="fetch">Download from hub</button>
+      <span class="hint" id="incoming-hint"></span>
+    </div>
 
     <label class="field-label" for="checksum">Code from the Aiden tool</label>
     <input id="checksum" class="control mono" autocomplete="off" spellcheck="false"

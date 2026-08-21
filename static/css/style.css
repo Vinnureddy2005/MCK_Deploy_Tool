@@ -493,3 +493,12 @@ textarea.control { resize: vertical; word-break: break-all; font-family: var(--m
   border-color: var(--warn);
   color: var(--warn);
 }
+
+.bundle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.bundle-actions .hint { margin: 0; }

@@ -18,6 +18,7 @@
     var stepper = byId("stepper");
     var panels = { 1: byId("panel-1"), 2: byId("panel-2"), 3: byId("panel-3") };
     var bundleLine = byId("bundle");
+    var fetchButton = byId("fetch");
     var incomingHint = byId("incoming-hint");
     var checksumInput = byId("checksum");
     var verifyButton = byId("verify");
@@ -143,6 +144,30 @@
         return new Date(epochSeconds * 1000).toLocaleString([], {
             day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
         });
+    }
+
+    /* Downloading is optional: copying the file into the incoming folder by
+       hand lands it in exactly the same place, and everything after this point
+       is identical either way. The hash is not checked here - this only puts
+       bytes on disk. Verify is the gate. */
+    async function fetchFromHub() {
+        clearError();
+        fetchButton.disabled = true;
+        var was = fetchButton.textContent;
+        fetchButton.textContent = "Downloading\u2026";
+        try {
+            var body = await post("/fetch");
+            if (body.simulated) {
+                showError("Dry run: the download was simulated, so nothing was " +
+                          "written. Copy the bundle in by hand to rehearse the rest.");
+            }
+            await loadBundle();
+        } catch (err) {
+            showError(err.message);
+        } finally {
+            fetchButton.disabled = false;
+            fetchButton.textContent = was;
+        }
     }
 
     async function verify() {
@@ -389,6 +414,7 @@
     /* ---------- boot ----------------------------------------------------- */
 
     verifyButton.addEventListener("click", verify);
+    fetchButton.addEventListener("click", fetchFromHub);
     preflightButton.addEventListener("click", runPreflight);
     backButton.addEventListener("click", function () {
         clearError();
