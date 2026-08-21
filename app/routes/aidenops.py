@@ -26,6 +26,7 @@ from app.services.aidenops_backend import (
     BackendError,
 )
 from app.services.aidenops_frontend import FrontendDeployer, FrontendError
+from app.services import aidenops_logs
 from app.services.aidenops_logs import AidenOpsLogStreamer
 from app.services.aidenops_release import ReleaseError, ReleaseStager, extract_member
 from app.services.download_service import DownloadError, DownloadService
@@ -46,6 +47,12 @@ class DeployRequest(BaseModel):
     # A destructive migration or a dependency change needs an explicit decision.
     # The client re-posts with this set after the operator has seen what changes.
     confirmed: bool = False
+
+
+class LogsRequest(BaseModel):
+    # Which half to follow: "ui", "backend", or absent for both. Absent is the
+    # investigating case, where nothing was deployed and everything is wanted.
+    target: str | None = Field(default=None, max_length=16)
 
 
 def _handle(exc: Exception) -> HTTPException:
@@ -339,19 +346,33 @@ async def deploy(request: DeployRequest) -> dict:
 
 
 @router.post("/logs/start")
-async def start_logs() -> dict:
-    """Follow the AidenOps journal and both nginx logs.
+async def start_logs(request: LogsRequest | None = None) -> dict:
+    """Follow the logs for one half of the application, or for both.
 
     Separate from a deployment on purpose: the most useful time to read these is
     while investigating, not only while deploying.
+
+    The half matters. Following the service journal after a UI deployment says
+    the backend was involved, and it was not - the frontend pipeline never
+    restarts the service or touches the wheel.
     """
+    target = request.target if request else None
+    if target is not None and target not in aidenops_logs.HALVES:
+        raise HTTPException(status_code=400, detail=f"Unknown target: {target!r}")
     try:
         await deployment_service.connect()
         streamer = _streamer()
-        await streamer.start()
+        await streamer.start(half=target)
     except Exception as exc:
         raise _handle(exc) from exc
-    return {"streaming": streamer.active, "unit": config.settings.aidenops_unit}
+    streaming = streamer.streaming
+    return {
+        "streaming": streamer.active,
+        "sources": sorted(streaming),
+        # So the page knows whether to say anything about the service at all.
+        "journal": "journal" in streaming,
+        "unit": config.settings.aidenops_unit,
+    }
 
 
 @router.post("/logs/stop")

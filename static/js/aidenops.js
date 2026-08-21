@@ -442,7 +442,7 @@
             var body = await post("/deploy", { target: key, confirmed: !!confirmed });
             renderOutcome(key, body.result);
             markDone(button, key, label);
-            await startServerLogs();
+            await startServerLogs(key);
         } catch (err) {
             if (err.status === 409 && err.detail && err.detail.needs_confirmation) {
                 askToConfirm(key, label, err.detail, button);
@@ -553,15 +553,21 @@
         aftermath.appendChild(el("pre", "runbook", detail.runbook.join("\n")));
     }
 
-    async function startServerLogs() {
+    /* Only the logs belonging to what was just deployed. A UI deployment never
+       restarts the service or touches the wheel, so following its journal here
+       would put lines in the Backend tab for work that did not happen - which
+       reads as though the backend had been deployed too. */
+    async function startServerLogs(key) {
+        var tab = key === "backend" ? "backend" : "frontend";
         try {
-            var body = await post("/logs/start");
-            push("backend", "=== following " + body.unit + " ===", "journal");
-            push("frontend", "=== following the nginx logs ===", "nginx");
+            var body = await post("/logs/start", { target: key });
+            push(tab, body.journal
+                ? "=== following " + body.unit + " ==="
+                : "=== following the nginx logs ===", body.journal ? "journal" : "nginx");
         } catch (err) {
             /* Not a deployment failure: the deployment succeeded, only the
                stream did not start. */
-            push(deploying || active, "could not start the server logs: " + err.message);
+            push(tab, "could not start the server logs: " + err.message);
         }
     }
 

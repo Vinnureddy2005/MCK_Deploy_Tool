@@ -264,10 +264,26 @@ Restarting either reports success and changes nothing.
 
 ### Live logs
 
-The page follows three sources. `journalctl` because the app logs to stdout only
-— there is no file log the way the Java services have one. And **both nginx
+There are three sources. `journalctl` because the app logs to stdout only —
+there is no file log the way the Java services have one. And **both nginx
 logs**, because both real UI failures on this server were diagnosed from
 `error.log` and were invisible in the AidenOps journal.
+
+**Only the half you deployed is followed.**
+
+| you deployed | the page follows | tab |
+|---|---|---|
+| UI bundle | nginx `error.log`, `access.log` | Frontend |
+| backend wheel | `journalctl -u aidenops` | Backend |
+
+The UI pipeline never restarts the service, reinstalls the wheel, or opens the
+database, so attaching its journal after a UI deployment would fill the Backend
+tab with lines for work that did not happen — which reads as though the backend
+had been deployed too. Deploy both halves and both sets run; the nginx streams
+are not restarted to add the journal.
+
+Following is read-only either way (`journalctl -f`, `tail -F`). To read
+everything without deploying, `POST /api/aidenops/logs/start` with no body.
 
 ---
 

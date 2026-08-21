@@ -88,3 +88,18 @@ def test_the_layout_is_responsive():
     assert collapse, "no rule collapsing the two-column layout"
     assert "grid-template-columns: 1fr" in collapse.group(1)
     assert "position: static" in collapse.group(1)
+
+
+def test_the_page_asks_only_for_the_logs_of_what_it_deployed():
+    """The Backend tab must stay quiet after a UI deployment.
+
+    The frontend pipeline never restarts the service or touches the wheel, so
+    journal lines arriving here would report a backend deployment that did not
+    happen.
+    """
+    assert 'post("/logs/start", { target: key })' in JS
+    assert "startServerLogs(key)" in JS
+    # The destination tab follows the half, so the UI half cannot write into the
+    # Backend tab at all.
+    assert 'var tab = key === "backend" ? "backend" : "frontend";' in JS
+    assert 'push("backend"' not in JS.split("async function startServerLogs")[1]

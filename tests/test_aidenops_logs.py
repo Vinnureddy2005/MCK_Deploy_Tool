@@ -55,10 +55,40 @@ class FakeSSH:
         return CommandResult(" ".join(argv), 0, f"output of {argv[0]}", "")
 
 
+class LiveChannel(FakeChannel):
+    """Stays open, the way `tail -F` and `journalctl -f` do.
+
+    FakeChannel reports its exit status immediately, so its pump thread ends at
+    once - which is right for testing what gets launched, but it cannot model a
+    stream that is still running, and that is the whole question when a second
+    deployment asks for its logs.
+    """
+
+    def exit_status_ready(self):
+        return False
+
+
+class LiveSSH(FakeSSH):
+    def open_log_channel(self, argv, sudo=True):
+        self.channels.append([str(a) for a in argv])
+        return LiveChannel()
+
+
 @pytest.fixture
 def streamer(dry_settings):
     ssh = FakeSSH()
     return AidenOpsLogStreamer(ssh, Broadcaster(), dry_settings), ssh
+
+
+@pytest.fixture
+async def live(dry_settings):
+    """A streamer whose streams keep running until stopped."""
+    ssh = LiveSSH()
+    stream = AidenOpsLogStreamer(ssh, Broadcaster(), dry_settings)
+    yield stream, ssh
+    # Joined rather than abandoned: a pump thread outliving its test can still
+    # be holding a channel when the next one starts.
+    await stream.stop()
 
 
 # --- why this class exists at all -----------------------------------------
@@ -253,3 +283,100 @@ async def test_only_safe_lines_reach_the_browser(dry_settings):
     await asyncio.sleep(0.05)
 
     assert [event["message"] for event in published] == ["starting up"]
+
+
+# --- one half at a time ----------------------------------------------------
+#
+# A UI deployment moves static files. It does not restart the service, reinstall
+# the wheel, or open the database - grep the frontend pipeline and none of those
+# words appear in it. So following the service journal during one puts lines in
+# the Backend tab for work that never happened, and the page ends up reporting a
+# backend deployment that did not occur.
+
+
+async def test_a_ui_deploy_does_not_follow_the_service_journal(live):
+    stream, ssh = live
+    await stream.start(half="ui")
+
+    followed = [argv[0] for argv in ssh.channels]
+    assert "journalctl" not in followed, "the UI half must not attach the journal"
+    assert followed == ["tail", "tail"]
+    assert stream.streaming == {"nginx-error", "nginx-access"}
+    # Nothing claims the service is being watched, so nothing can imply it was
+    # deployed.
+    assert stream.unit is None
+
+
+async def test_a_backend_deploy_follows_the_journal(live):
+    stream, ssh = live
+    await stream.start(half="backend")
+
+    assert [argv[0] for argv in ssh.channels] == ["journalctl"]
+    assert stream.streaming == {"journal"}
+    assert stream.unit == stream.settings.aidenops_unit
+
+
+async def test_no_half_still_follows_everything(live):
+    """The investigating case: nothing was deployed and all three are wanted."""
+    stream, ssh = live
+    await stream.start()
+    assert stream.streaming == {"journal", "nginx-error", "nginx-access"}
+
+
+async def test_deploying_both_halves_ends_up_following_both(live):
+    """Additive, and it must not restart what is already running.
+
+    Restarting a `tail -F` re-prints its last N lines, which reads as though the
+    same thing had happened twice - during a deployment that is exactly the
+    wrong thing to suggest.
+    """
+    stream, ssh = live
+    await stream.start(half="ui")
+    await stream.start(half="backend")
+
+    assert stream.streaming == {"journal", "nginx-error", "nginx-access"}
+    followed = [argv[0] for argv in ssh.channels]
+    assert followed == ["tail", "tail", "journalctl"], followed
+    assert followed.count("tail") == 2, "the nginx logs were restarted"
+
+
+async def test_starting_the_same_half_twice_changes_nothing(live):
+    stream, ssh = live
+    await stream.start(half="ui")
+    await stream.start(half="ui")
+    assert len(ssh.channels) == 2
+
+
+async def test_an_unknown_half_is_refused(streamer):
+    stream, _ = streamer
+    with pytest.raises(ValueError):
+        await stream.start(half="frontend")   # the tab's name, not a half's
+
+
+async def test_stopping_forgets_what_was_running(streamer):
+    stream, ssh = streamer
+    await stream.start(half="backend")
+    await stream.stop()
+    assert stream.streaming == set()
+
+    # And a later start works rather than believing it is already streaming.
+    await stream.start(half="backend")
+    assert [argv[0] for argv in ssh.channels] == ["journalctl", "journalctl"]
+
+
+async def test_a_stream_that_died_is_restarted(live):
+    """The service restarting under `journalctl -f` ends that stream.
+
+    Remembering the name as "running" would mean the journal never came back for
+    the rest of the session - the tab would just stop, with nothing said.
+    """
+    stream, ssh = live
+    await stream.start(half="backend")
+    assert stream.streaming == {"journal"}
+
+    await stream.stop()                       # stands in for the stream ending
+    assert stream.streaming == set()
+
+    await stream.start(half="backend")
+    assert stream.streaming == {"journal"}
+    assert [argv[0] for argv in ssh.channels] == ["journalctl", "journalctl"]

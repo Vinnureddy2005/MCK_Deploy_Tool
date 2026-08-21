@@ -344,3 +344,76 @@ def test_the_hash_is_checked_where_the_file_lands():
 
     body = inspect.getsource(aidenops_release.ReleaseStager.stage)
     assert body.index("_remote_sha256") < body.index('"cp"')
+
+
+# --- the log endpoint only follows what was deployed -----------------------
+
+
+def _fake_streamer(monkeypatch):
+    """Capture the half asked for, without connecting to anything."""
+    from app.routes import aidenops as route
+
+    calls = []
+
+    class Streamer:
+        active = True
+
+        def __init__(self):
+            self.sources = set()
+
+        async def start(self, unit_name=None, log_path=None, *, half=None):
+            calls.append(half)
+            from app.services.aidenops_logs import HALVES
+            self.sources |= set(HALVES[half]) if half else {
+                s for names in HALVES.values() for s in names
+            }
+
+        @property
+        def streaming(self):
+            return self.sources
+
+    streamer = Streamer()
+    monkeypatch.setattr(route, "_streamer", lambda: streamer)
+
+    async def connected():
+        return True
+
+    monkeypatch.setattr(route.deployment_service, "connect", connected)
+    return calls
+
+
+def test_following_the_ui_half_leaves_the_journal_alone(monkeypatch):
+    calls = _fake_streamer(monkeypatch)
+    body = client.post("/api/aidenops/logs/start", json={"target": "ui"}).json()
+
+    assert calls == ["ui"]
+    assert body["sources"] == ["nginx-access", "nginx-error"]
+    # The page uses this to decide whether to say anything about the service.
+    # A UI deployment never restarts it, so there is nothing to say.
+    assert body["journal"] is False
+
+
+def test_following_the_backend_half_attaches_the_journal(monkeypatch):
+    calls = _fake_streamer(monkeypatch)
+    body = client.post("/api/aidenops/logs/start", json={"target": "backend"}).json()
+
+    assert calls == ["backend"]
+    assert body["sources"] == ["journal"]
+    assert body["journal"] is True
+
+
+def test_asking_for_no_half_follows_everything(monkeypatch):
+    """No body at all: the investigating case, and the older callers."""
+    calls = _fake_streamer(monkeypatch)
+    body = client.post("/api/aidenops/logs/start").json()
+
+    assert calls == [None]
+    assert body["journal"] is True
+
+
+def test_an_unknown_target_is_refused_before_anything_is_started(monkeypatch):
+    calls = _fake_streamer(monkeypatch)
+    response = client.post("/api/aidenops/logs/start", json={"target": "everything"})
+
+    assert response.status_code == 400
+    assert calls == [], "nothing should have been started"
