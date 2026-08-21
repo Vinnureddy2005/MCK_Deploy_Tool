@@ -34,6 +34,7 @@
     var hostLine = byId("target-host");
 
     var release = null;
+    var failedChecks = [];   /* named on the deploy panel, not just counted */
 
     /* ---------- helpers -------------------------------------------------- */
 
@@ -230,6 +231,8 @@
                 });
                 preflightList.appendChild(item);
             });
+            failedChecks = body.checks.filter(function (c) { return !c.ok; })
+                                      .map(function (c) { return c.name; });
             renderTargets(body.ok);
             goto(3);
         } catch (err) {
@@ -272,8 +275,13 @@
         button.type = "button";
         button.disabled = !preflightOk;
         if (!preflightOk) {
+            /* Naming them matters: the checks are on the previous stage, which
+               is hidden by now, so "fix the failing checks" without saying which
+               ones sends you looking with nothing to go on. */
             card.appendChild(el("p", "notice-inline",
-                "Fix the failing server checks first."));
+                failedChecks.length
+                    ? "Fix these server checks first: " + failedChecks.join(", ")
+                    : "Fix the failing server checks first."));
         }
         button.addEventListener("click", function () { deploy(key, button); });
         card.appendChild(button);
@@ -420,6 +428,16 @@
         clearError();
         goto(1);
     });
+
+    /* Stage 3 needs a way back to stage 2. Being told to fix a check with no
+       route to reading it is a dead end. */
+    var backToChecks = el("button", "btn btn-ghost", "Back to the server checks");
+    backToChecks.type = "button";
+    backToChecks.addEventListener("click", function () {
+        clearError();
+        goto(2);
+    });
+    panels[3].appendChild(backToChecks);
 
     (async function boot() {
         goto(1);
