@@ -1,0 +1,683 @@
+/* AidenOps deployment console.
+ *
+ * Its own stylesheet, loaded only by /aidenops. The TX-PROJECTS page shares
+ * nothing with it, so nothing here can affect a deployment path in daily use.
+ *
+ * Light throughout, including the log panel. A dark console would be the
+ * conventional choice for monospace output, but this is a single-theme light
+ * design by instruction, and a tinted panel with coloured severity marks reads
+ * just as well without breaking that.
+ *
+ * This is an operations console: it is scanned and operated, not read. So state
+ * is encoded in shape as well as colour - a filled dot, a chip, a rule - and the
+ * log panel gets the space, because during a deployment it is the whole screen
+ * that matters.
+ */
+
+:root {
+  /* Cool, slightly blue-biased neutrals - chosen, not inherited grey. */
+  --ground: #eef1f7;
+  --surface: #ffffff;
+  --sunken: #f6f8fc;
+  --console: #f4f7fb;
+  --line: #dde3ee;
+  --line-firm: #c2cddd;
+
+  --ink: #0f1a2b;
+  --ink-soft: #4c5a70;
+  --ink-faint: #8291a7;
+
+  /* Teal is AidenOps. The Java page is blue, so the two are never mistaken
+     for each other at a glance - which matters when one is live. */
+  --accent: #0d6f68;
+  --accent-deep: #0a544f;
+  --accent-wash: #e3f1ef;
+
+  --ok: #0a7d4f;
+  --ok-wash: #e6f4ec;
+  --warn: #8a5a00;
+  --warn-wash: #fcf3e1;
+  --bad: #ad2419;
+  --bad-wash: #fceceb;
+
+  --mono: "Cascadia Mono", "Consolas", "SF Mono", Menlo, monospace;
+  --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  --r: 10px;
+  --r-sm: 6px;
+  --shadow: 0 1px 2px rgba(15, 26, 43, .05), 0 6px 16px rgba(15, 26, 43, .06);
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+[hidden] { display: none !important; }
+
+.shell {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+}
+
+/* ─────────────────────────────────────────────────────────── header ───── */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 13px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+}
+
+.top__brand { display: flex; align-items: center; gap: 13px; margin-right: auto; }
+
+.top__mark {
+  display: grid;
+  place-items: center;
+  width: 40px; height: 40px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.top__title { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+
+.top__where {
+  margin: 1px 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+.tabs-page { display: flex; gap: 4px; }
+
+.tabs-page a, .tabs-page span {
+  padding: 7px 14px;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.tabs-page a:hover { background: var(--accent-wash); color: var(--accent-deep); }
+
+.tabs-page .is-here {
+  background: var(--accent-wash);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.pill {
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  border: 1px solid;
+}
+
+.pill--live { color: var(--bad); background: var(--bad-wash); border-color: var(--bad); }
+.pill--dry { color: var(--warn); background: var(--warn-wash); border-color: var(--warn); }
+.pill--conn { color: var(--ink-faint); background: var(--sunken); border-color: var(--line-firm); }
+.pill--conn.is-on { color: var(--ok); background: var(--ok-wash); border-color: var(--ok); }
+
+/* ──────────────────────────────────────────────────────── stage rail ───── */
+
+.rail {
+  display: flex;
+  align-items: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.rail__step {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 18px;
+  color: var(--ink-faint);
+  position: relative;
+  min-width: 0;
+}
+
+/* A chevron rather than a connecting line: it points the direction of travel,
+   which a plain rule does not. */
+.rail__step + .rail__step::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 50%;
+  width: 9px; height: 9px;
+  border-right: 2px solid var(--line-firm);
+  border-top: 2px solid var(--line-firm);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.rail__n {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--line-firm);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rail__label { font-size: 13.5px; font-weight: 600; white-space: nowrap; }
+.rail__note { font-size: 11.5px; color: var(--ink-faint); }
+
+.rail__step.is-now { color: var(--accent-deep); background: var(--accent-wash); }
+.rail__step.is-now .rail__n {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.rail__step.is-done { color: var(--ok); }
+.rail__step.is-done .rail__n {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: #fff;
+  font-size: 0;
+}
+.rail__step.is-done .rail__n::after { content: "\2713"; font-size: 14px; line-height: 1; }
+
+/* ───────────────────────────────────────────────────────────── layout ───── */
+
+.work {
+  display: grid;
+  grid-template-columns: minmax(420px, 5fr) minmax(380px, 6fr);
+  gap: 14px;
+  align-items: start;
+  flex: 1;
+  min-height: 0;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.card__lead { margin: 0; font-size: 13px; color: var(--ink-soft); max-width: 62ch; }
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ────────────────────────────────────────────────── stage 1: verify ───── */
+
+.file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 11px 13px;
+  background: var(--sunken);
+  border: 1px solid var(--line-firm);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.file__meta { color: var(--ink-soft); font-size: 11.5px; }
+
+.file.is-missing {
+  background: var(--warn-wash);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.code-input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--line-firm);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: .04em;
+  color: var(--ink);
+}
+
+.code-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.hint { margin: 0; font-size: 12px; color: var(--ink-faint); }
+
+/* ───────────────────────────────────────────────────────────── buttons ──── */
+
+.btn {
+  appearance: none;
+  padding: 10px 18px;
+  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.btn--go { background: var(--accent); color: #fff; }
+.btn--go:hover:not(:disabled) { background: var(--accent-deep); }
+
+.btn--quiet {
+  background: var(--surface);
+  border-color: var(--line-firm);
+  color: var(--ink-soft);
+}
+.btn--quiet:hover:not(:disabled) { background: var(--sunken); color: var(--ink); }
+
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ───────────────────────────────────────────────────────── facts table ──── */
+
+.facts { display: grid; gap: 0; margin: 0; }
+
+.facts > div {
+  display: grid;
+  grid-template-columns: minmax(0, 150px) minmax(0, 1fr);
+  gap: 14px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+
+.facts > div:first-child { border-top: none; }
+.facts dt { font-size: 12.5px; color: var(--ink-soft); }
+.facts dd { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.facts dd.mono { font-family: var(--mono); font-size: 12px; }
+
+/* ────────────────────────────────────────────────── stage 2: checks ───── */
+
+.checks { margin: 0; padding: 0; list-style: none; }
+
+.check {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 145px) minmax(0, 1fr);
+  gap: 3px 11px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.check:first-child { border-top: none; }
+
+.check__dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: var(--ok);
+}
+
+.check.is-bad .check__dot { background: var(--bad); }
+.check.is-info .check__dot { background: var(--line-firm); }
+
+.check__name { font-weight: 600; }
+.check.is-bad .check__name { color: var(--bad); }
+.check.is-info .check__name { color: var(--ink-soft); font-weight: 500; }
+
+.check__detail {
+  grid-column: 3;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.check__warn {
+  grid-column: 2 / -1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--warn);
+}
+
+/* ──────────────────────────────────────────────────── stage 3: deploy ──── */
+
+.target {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.target:first-child { border-top: none; padding-top: 0; }
+
+.target__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.target__name { margin: 0; font-size: 14px; font-weight: 650; }
+
+.chip {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  background: var(--accent-wash);
+  color: var(--accent-deep);
+}
+
+.target__file {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.done {
+  margin: 0;
+  padding: 9px 13px;
+  border-radius: var(--r-sm);
+  background: var(--ok-wash);
+  border: 1px solid var(--ok);
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 700;
+  align-self: flex-start;
+}
+
+.note {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid;
+}
+
+.note--warn { background: var(--warn-wash); border-color: var(--warn); color: var(--warn); }
+.note--bad { background: var(--bad-wash); border-color: var(--bad); color: var(--bad); }
+.note--info { background: var(--sunken); border-color: var(--line-firm); color: var(--ink-soft); }
+
+.note__title { margin: 0 0 5px; font-weight: 700; }
+.note ul { margin: 4px 0 0; padding-left: 18px; }
+.note li { font-family: var(--mono); font-size: 11.5px; }
+
+.runbook {
+  margin: 0;
+  padding: 11px 13px;
+  background: var(--sunken);
+  border: 1px solid var(--bad);
+  border-left-width: 3px;
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  color: var(--ink);
+}
+
+/* ───────────────────────────────────────────────────────── the console ──── */
+
+.console {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+}
+
+.console__bar {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--sunken);
+}
+
+.console__tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 11px 15px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--ink-faint);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.console__tab:hover { color: var(--ink-soft); }
+
+.console__tab.is-on {
+  color: var(--accent-deep);
+  border-bottom-color: var(--accent);
+  background: var(--surface);
+}
+
+/* A count, not just a dot: on an inactive tab it says how much you have not
+   looked at, which a dot cannot. */
+.console__count {
+  min-width: 19px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.console__tab.has-new .console__count { background: var(--accent); color: #fff; }
+.console__tab.has-bad .console__count { background: var(--bad); color: #fff; }
+
+.console__spacer { flex: 1; }
+
+.console__clear {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+
+.console__clear:hover { color: var(--ink-soft); }
+
+.console__body {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--console);
+  overflow: auto;
+  flex: 1;
+  min-height: 320px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.console__empty { color: var(--ink-faint); font-style: italic; }
+
+.line { display: grid; grid-template-columns: 54px 1fr; gap: 10px; }
+.line__at { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.line__text { white-space: pre-wrap; word-break: break-word; }
+
+/* Severity read from the text, because journalctl and nginx do not tag it and
+   an operator scanning a wall of lines needs the failures to surface. */
+.line.is-bad .line__text { color: var(--bad); font-weight: 600; }
+.line.is-warn .line__text { color: var(--warn); }
+.line.is-step .line__text { color: var(--accent-deep); font-weight: 650; }
+
+.line__tag {
+  display: inline-block;
+  margin-right: 7px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--line);
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+/* ───────────────────────────────────────────────────── the copied code ──── */
+
+.hash {
+  display: block;
+  padding: 12px 14px;
+  background: var(--sunken);
+  border: 1px solid var(--line-firm);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.8;
+  letter-spacing: .06em;
+  word-break: break-all;
+}
+
+.foot {
+  margin: 0;
+  padding: 2px 4px 0;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* ─────────────────────────────────────────────────────── the error card ──── */
+
+#error-card {
+  position: fixed;
+  left: 20px;
+  right: 20px;
+  bottom: 18px;
+  max-width: 860px;
+  margin: 0 auto;
+  border-color: var(--bad);
+  z-index: 30;
+}
+
+/* ────────────────────────────────────────────────────────── responsive ──── */
+
+/* The console stops being a column and becomes the section below. It also stops
+   being sticky - a sticky panel in a single-column layout pins itself over the
+   thing you are trying to read. */
+@media (max-width: 1080px) {
+  .work { grid-template-columns: 1fr; }
+
+  .console {
+    position: static;
+    max-height: none;
+  }
+
+  .console__body { min-height: 260px; max-height: 46vh; }
+}
+
+@media (max-width: 860px) {
+  .shell { padding: 12px 14px 20px; gap: 11px; }
+
+  .top { gap: 12px; padding: 11px 14px; }
+  .top__brand { width: 100%; }
+  .tabs-page { order: 3; }
+
+  /* Wrapped rather than squeezed: three steps at this width would put two
+     words on three lines each. */
+  .rail { flex-wrap: wrap; }
+  .rail__step { flex: 1 1 100%; padding: 10px 14px; }
+  .rail__step + .rail__step::before {
+    left: 22px;
+    top: 0;
+    transform: translate(-50%, -50%) rotate(135deg);
+  }
+
+  .card { padding: 15px 16px; }
+
+  /* Labels above values, which is the only thing that fits and reads. */
+  .facts > div { grid-template-columns: 1fr; gap: 2px; }
+  .facts dt { font-size: 11.5px; color: var(--ink-faint); }
+
+  .check { grid-template-columns: 18px 1fr; }
+  .check__detail, .check__warn { grid-column: 2; }
+}
+
+@media (max-width: 560px) {
+  /* The step notes are the first thing to go: helpful, not load-bearing. */
+  .rail__note { display: none; }
+
+  .btn { width: 100%; text-align: center; }
+  .btn--quiet, .btn--go { align-self: stretch; }
+  .done { align-self: stretch; text-align: center; }
+
+  .console__tab { padding: 10px 11px; font-size: 12px; }
+  .console__body { font-size: 11px; padding: 10px; }
+  .line { grid-template-columns: 46px 1fr; gap: 7px; }
+
+  /* A 64-character hash cannot be one line here, so let it wrap in blocks
+     rather than force the page sideways. */
+  .hash { font-size: 12px; letter-spacing: .04em; }
+
+  #error-card { left: 10px; right: 10px; bottom: 10px; }
+}
+
+/* Nothing may push the page sideways. Wide content scrolls inside its own box. */
+.runbook, .console__body, .hash { max-width: 100%; }

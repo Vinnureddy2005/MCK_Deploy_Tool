@@ -1,13 +1,22 @@
-/* AidenOps screen: verify, check, deploy.
+/* AidenOps deployment console.
  *
- * Separate from app.js on purpose. That page pastes a checksum and replaces one
- * JAR; this one verifies an archive locally and then runs a pipeline that
- * reverts itself. Sharing code would mean branching on "which flow is this" in
- * both directions.
+ * Separate from app.js. That page pastes a checksum and replaces one JAR; this
+ * one verifies an archive locally and then runs two pipelines with opposite
+ * failure behaviour. Sharing code would mean branching on "which flow is this"
+ * in both directions.
  *
- * Only one stage is on screen at a time, and nothing appears before it is
- * earned - the deploy stage does not exist until an archive has passed both
- * local checks.
+ * The console is the part worth explaining. Everything used to land in one
+ * stream: the tool's own progress, the backend journal, and both nginx logs,
+ * interleaved. During a deployment that is the screen you are staring at, and
+ * mixing four sources makes the one line that matters hardest to find.
+ *
+ * Two tabs now, one per half. The server tags each line - journal goes to the
+ * backend, nginx to the frontend, since that is what each one is about - and the
+ * tool's own messages go to whichever half is being deployed.
+ *
+ * Shared work, verification and staging, is echoed into both. That is
+ * deliberate duplication: it means either tab read on its own tells the whole
+ * story, including the steps that came before the deployment.
  */
 (function () {
     "use strict";
@@ -15,30 +24,53 @@
     var API = "/api/aidenops";
 
     var byId = document.getElementById.bind(document);
-    var stepper = byId("stepper");
+    var rail = byId("rail");
     var panels = { 1: byId("panel-1"), 2: byId("panel-2"), 3: byId("panel-3") };
-    var bundleLine = byId("bundle");
-    var incomingHint = byId("incoming-hint");
-    var checksumInput = byId("checksum");
+    var fileLine = byId("file");
+    var codeInput = byId("code");
     var verifyButton = byId("verify");
+    var checkButton = byId("check");
     var releaseFacts = byId("release-facts");
-    var preflightList = byId("preflight");
-    var preflightButton = byId("run-preflight");
-    var backButton = byId("back-to-1");
+    var checksList = byId("checks");
     var targetsHost = byId("targets");
-    var deployFacts = byId("deploy-facts");
-    var errorBox = byId("error");
-    var errorMessage = byId("error-message");
-    var logBox = byId("log");
-    var hostLine = byId("target-host");
+    var outcome = byId("outcome");
+    var aftermath = byId("aftermath");
+    var whereLine = byId("where");
+    var whereHint = byId("where-hint");
+    var errorCard = byId("error-card");
+    var errorText = byId("error-text");
+    var tabBar = byId("console-tabs");
+    var consoleBody = byId("console-body");
 
     var release = null;
-    var failedChecks = [];   /* named on the deploy panel, not just counted */
+    var failedChecks = [];
+    /* Which half is being deployed, so the tool's own lines land in the right
+       tab rather than all in one place. */
+    var deploying = null;
 
-    /* ---------- helpers -------------------------------------------------- */
+    /* ---------- the console --------------------------------------------- */
 
-    /* textContent throughout: filenames, hashes and server output all come from
-       outside and must never be parsed as markup. */
+    var TABS = [
+        { key: "frontend", label: "Frontend",
+          empty: "The UI deployment and the nginx logs appear here." },
+        { key: "backend", label: "Backend",
+          empty: "The backend deployment and its journal appear here." }
+    ];
+
+    /* Where each server-tagged source belongs. nginx goes with the frontend
+       because that is what it serves; the journal with the backend because that
+       is what writes it. */
+    var ROUTES = {
+        "journal": { tab: "backend", tag: "journal" },
+        "nginx-error": { tab: "frontend", tag: "nginx", bad: true },
+        "nginx-access": { tab: "frontend", tag: "access" }
+    };
+
+    var lines = { frontend: [], backend: [] };
+    var unread = { frontend: 0, backend: 0 };
+    var hasBad = { frontend: false, backend: false };
+    var active = "frontend";
+
     function el(tag, className, text) {
         var node = document.createElement(tag);
         if (className) { node.className = className; }
@@ -46,24 +78,117 @@
         return node;
     }
 
-    function bytes(size) {
-        if (size === null || size === undefined) { return "—"; }
-        if (size < 1024) { return size + " B"; }
-        var units = ["KB", "MB", "GB"], value = size / 1024, i = 0;
-        while (value >= 1024 && i < units.length - 1) { value = value / 1024; i += 1; }
-        return value.toFixed(value < 10 ? 1 : 0) + " " + units[i];
+    function stamp() {
+        var d = new Date();
+        return String(d.getHours()).padStart(2, "0") + ":" +
+               String(d.getMinutes()).padStart(2, "0") + ":" +
+               String(d.getSeconds()).padStart(2, "0");
     }
 
-    function blocks(hash) {
-        return hash ? String(hash).replace(/(.{8})/g, "$1 ").trim() : "—";
+    /* journalctl and nginx do not tag severity, so it is read from the text. An
+       operator scanning a wall of lines needs the failures to surface. */
+    function severity(text, forcedBad) {
+        var lower = String(text).toLowerCase();
+        if (forcedBad ||
+            /\b(error|failed|failure|denied|refus|cannot|traceback|critical)\b/.test(lower)) {
+            return "is-bad";
+        }
+        if (/\b(warn|note|skipping|deprecat)\b/.test(lower)) { return "is-warn"; }
+        if (/^===|^---/.test(text) ||
+            /^\s*(deploying|uploading|extracting|swapping|installing|verifying|starting|stopping|dumping|pruning|copying|unpacking|archiving|setting|writing|restoring|waiting|downloading|running)/i.test(text)) {
+            return "is-step";
+        }
+        return "";
     }
+
+    function push(tabKey, text, tag, forcedBad) {
+        var level = severity(text, forcedBad);
+        lines[tabKey].push({ at: stamp(), text: String(text), tag: tag || "", level: level });
+        /* Bounded: a journal tail can run a long time and the browser should not
+           be the thing that gives out. */
+        if (lines[tabKey].length > 2000) { lines[tabKey].shift(); }
+
+        if (level === "is-bad") { hasBad[tabKey] = true; }
+        if (tabKey === active) { renderConsole(); } else { unread[tabKey] += 1; }
+        renderTabs();
+    }
+
+    /* Shared steps belong to both stories. */
+    function pushBoth(text, tag) {
+        TABS.forEach(function (tab) { push(tab.key, text, tag); });
+    }
+
+    function renderTabs() {
+        tabBar.replaceChildren();
+        TABS.forEach(function (tab) {
+            var button = el("button", "console__tab" + (tab.key === active ? " is-on" : ""));
+            button.type = "button";
+            button.setAttribute("role", "tab");
+            button.append(el("span", null, tab.label));
+
+            var count = unread[tab.key] || lines[tab.key].length;
+            if (count) {
+                button.appendChild(el("span", "console__count", count));
+                if (tab.key !== active && unread[tab.key]) {
+                    button.classList.add(hasBad[tab.key] ? "has-bad" : "has-new");
+                }
+            }
+            button.addEventListener("click", function () {
+                active = tab.key;
+                unread[tab.key] = 0;
+                renderTabs();
+                renderConsole();
+            });
+            tabBar.appendChild(button);
+        });
+
+        tabBar.appendChild(el("span", "console__spacer"));
+        var clear = el("button", "console__clear", "Clear");
+        clear.type = "button";
+        clear.addEventListener("click", function () {
+            lines[active] = [];
+            hasBad[active] = false;
+            renderTabs();
+            renderConsole();
+        });
+        tabBar.appendChild(clear);
+    }
+
+    function renderConsole() {
+        var stuck = consoleBody.scrollTop + consoleBody.clientHeight >=
+                    consoleBody.scrollHeight - 24;
+        consoleBody.replaceChildren();
+
+        if (!lines[active].length) {
+            var tab = TABS.filter(function (t) { return t.key === active; })[0];
+            consoleBody.appendChild(el("div", "console__empty", tab.empty));
+            return;
+        }
+
+        lines[active].forEach(function (entry) {
+            var row = el("div", "line " + entry.level);
+            row.appendChild(el("span", "line__at", entry.at));
+            var text = el("span", "line__text");
+            if (entry.tag) { text.appendChild(el("span", "line__tag", entry.tag)); }
+            text.appendChild(document.createTextNode(entry.text));
+            row.appendChild(text);
+            consoleBody.appendChild(row);
+        });
+
+        /* Follow only if you were already at the bottom - yanking the view away
+           while someone reads further up is worse than not following. */
+        if (stuck) { consoleBody.scrollTop = consoleBody.scrollHeight; }
+    }
+
+    /* ---------- errors --------------------------------------------------- */
 
     function showError(message) {
-        errorMessage.textContent = message;
-        errorBox.hidden = false;
+        errorText.textContent = message;
+        errorCard.hidden = false;
+        push(deploying || active, message, "", true);
     }
 
-    function clearError() { errorBox.hidden = true; }
+    function clearError() { errorCard.hidden = true; }
 
     async function call(path, options) {
         var response = await fetch(API + path, options);
@@ -71,9 +196,6 @@
         try { body = await response.json(); } catch (ignored) { /* no body */ }
         if (!response.ok) {
             var detail = body && body.detail;
-            /* A confirmation and a failed deployment both carry structure rather
-               than just a sentence, so the raw detail travels with the error and
-               the caller can render the parts. */
             var failure = new Error(
                 (typeof detail === "string" && detail) ||
                 (detail && detail.message) ||
@@ -94,12 +216,33 @@
         });
     }
 
+    /* ---------- the stage rail ------------------------------------------ */
+
     function goto(stage) {
         [1, 2, 3].forEach(function (n) { panels[n].hidden = n !== stage; });
-        Array.prototype.forEach.call(stepper.children, function (item) {
-            var n = Number(item.dataset.stage);
-            item.classList.toggle("is-done", n < stage);
-            item.classList.toggle("is-current", n === stage);
+        Array.prototype.forEach.call(rail.children, function (step) {
+            var n = Number(step.dataset.stage);
+            step.classList.toggle("is-done", n < stage);
+            step.classList.toggle("is-now", n === stage);
+        });
+    }
+
+    function bytes(size) {
+        if (size === null || size === undefined) { return "—"; }
+        if (size < 1024) { return size + " B"; }
+        var units = ["KB", "MB", "GB"], value = size / 1024, i = 0;
+        while (value >= 1024 && i < units.length - 1) { value = value / 1024; i += 1; }
+        return value.toFixed(value < 10 ? 1 : 0) + " " + units[i];
+    }
+
+    function blocks(hash) {
+        return hash ? String(hash).replace(/(.{8})/g, "$1 ").trim() : "—";
+    }
+
+    function when(epochSeconds) {
+        if (!epochSeconds) { return "unknown"; }
+        return new Date(epochSeconds * 1000).toLocaleString([], {
+            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
         });
     }
 
@@ -109,53 +252,32 @@
         list.appendChild(row);
     }
 
-    /* ---------- stage 1: verify ------------------------------------------ */
+    /* ---------- stage 1 -------------------------------------------------- */
 
-    /* One name, so this reports rather than offers a choice. The size and
-       timestamp are the useful part: they show whether the file on this machine
-       is the one that was just built or last fortnight's. */
-    async function loadBundle() {
+    async function loadFile() {
         try {
             var data = await call("/bundle");
-            incomingHint.textContent = "Copy the bundle into " + data.incoming_dir;
+            whereHint.textContent = "Downloaded into " + data.incoming_dir;
 
             if (!data.present) {
-                bundleLine.textContent = data.name + " is not there yet";
-                bundleLine.className = "bundle bundle-missing";
-                verifyButton.disabled = true;
+                fileLine.className = "file is-missing";
+                fileLine.textContent = data.name + " is not here yet";
                 return;
             }
-            bundleLine.replaceChildren(
-                el("span", "mono", data.name),
-                el("span", "bundle-meta",
-                   bytes(data.size) + "  ·  copied " + when(data.modified))
+            fileLine.className = "file";
+            fileLine.replaceChildren(
+                el("span", null, data.name),
+                el("span", "file__meta", bytes(data.size) + "  ·  " + when(data.modified))
             );
-            bundleLine.className = "bundle";
-            verifyButton.disabled = false;
         } catch (err) {
             showError(err.message);
         }
     }
 
-    /* Local time here, unlike the IST-pinned server timestamps: this is when the
-       file landed on the machine you are sitting at. */
-    function when(epochSeconds) {
-        if (!epochSeconds) { return "unknown"; }
-        return new Date(epochSeconds * 1000).toLocaleString([], {
-            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
-        });
-    }
-
-    /* Downloading is optional: copying the file into the incoming folder by
-       hand lands it in exactly the same place, and everything after this point
-    /* One action, two steps. Downloading and verifying were separate buttons,
-       which made the sequence something the operator had to remember rather
-       than something the tool does.
-
-       The download is best effort on purpose: if the hub is unreachable but the
-       bundle was copied in by hand, that is a working path and should not be
-       turned into a failure. Either way the pasted code decides, so a stale
-       local file cannot slip through - it simply fails to match. */
+    /* One action, two steps. The download is best effort: if the hub is
+       unreachable but the bundle was copied in by hand, that is a working path.
+       Either way the pasted code decides, so a stale local file cannot slip
+       through - it simply fails to match. */
     async function verify() {
         clearError();
         verifyButton.disabled = true;
@@ -163,24 +285,31 @@
         var note = "";
 
         try {
-            verifyButton.textContent = "Downloading\u2026";
+            verifyButton.textContent = "Downloading…";
+            pushBoth("Downloading the bundle from the hub");
             var fetched = await post("/fetch");
             if (fetched.simulated) {
-                note = "Dry run: the download was simulated, so the file already " +
+                note = "Dry run: the download was simulated, so whatever is already " +
                        "in the incoming folder is what was verified.";
+                pushBoth(note);
+            } else {
+                pushBoth("Downloaded " + bytes(fetched.size));
             }
         } catch (err) {
             note = "Could not download from the hub (" + err.message +
                    "). Verified the file already in the incoming folder.";
+            pushBoth(note);
         }
 
         try {
-            verifyButton.textContent = "Verifying\u2026";
-            await loadBundle();
-            var body = await post("/verify", { checksum: checksumInput.value });
+            verifyButton.textContent = "Verifying…";
+            await loadFile();
+            var body = await post("/verify", { checksum: codeInput.value });
             release = body.release;
+            pushBoth("Verified " + release.archive + " — " + release.members.length +
+                     " files match SHA256SUMS.txt");
             renderRelease();
-            preflightList.replaceChildren();
+            checksList.replaceChildren(el("li", "hint", "Not run yet."));
             if (note) { showError(note); }
             goto(2);
         } catch (err) {
@@ -191,46 +320,52 @@
         }
     }
 
-    /* ---------- stage 2: what it is, and the server ---------------------- */
+    /* ---------- stage 2 -------------------------------------------------- */
 
     function renderRelease() {
         releaseFacts.replaceChildren();
-        fact(releaseFacts, "Archive", release.archive, true);
+        fact(releaseFacts, "Bundle", release.archive, true);
         fact(releaseFacts, "Verified hash", blocks(release.sha256), true);
         fact(releaseFacts, "Size", bytes(release.size), true);
         if (release.commits.length) {
-            fact(releaseFacts, "Commits", release.commits.join(" + "), true);
+            fact(releaseFacts, "Commits", release.commits.join("  +  "), true);
         }
         if (release.built_by) { fact(releaseFacts, "Built by", release.built_by); }
 
         var parts = [];
         if (release.contents.has_backend) { parts.push("backend wheel"); }
         if (release.contents.has_ui) { parts.push("UI bundle"); }
-        fact(releaseFacts, "Contains", parts.join(" + ") || "nothing deployable");
-        fact(releaseFacts, "Files verified", release.members.length + " against SHA256SUMS.txt");
+        fact(releaseFacts, "Contains", parts.join("  +  ") || "nothing deployable");
     }
 
-    async function runPreflight() {
+    async function runChecks() {
         clearError();
-        preflightButton.disabled = true;
-        var was = preflightButton.textContent;
-        preflightButton.textContent = "Checking…";
+        checkButton.disabled = true;
+        var was = checkButton.textContent;
+        checkButton.textContent = "Checking…";
         try {
+            pushBoth("Running the server checks");
             var body = await post("/preflight");
-            preflightList.replaceChildren();
+            checksList.replaceChildren();
+
             body.checks.forEach(function (check) {
-                var item = el("li", "check " + (check.ok ? "check-ok" : "check-bad"));
-                item.append(
-                    el("span", "check-name", check.name),
-                    el("span", "check-detail", check.detail)
+                var cls = check.info ? "check is-info"
+                                     : (check.ok ? "check" : "check is-bad");
+                var row = el("li", cls);
+                row.append(
+                    el("span", "check__dot"),
+                    el("span", "check__name", check.name),
+                    el("span", "check__detail", check.detail)
                 );
-                /* Warnings are shown, not suppressed: a placeholder in an
+                /* Warnings are shown, never suppressed: a placeholder in an
                    integration nobody uses is worth seeing without blocking. */
                 (check.warn || []).forEach(function (path) {
-                    item.appendChild(el("span", "check-warn", "placeholder: " + path));
+                    row.appendChild(el("span", "check__warn", "placeholder: " + path));
                 });
-                preflightList.appendChild(item);
+                checksList.appendChild(row);
+                pushBoth(check.name + ": " + check.detail);
             });
+
             failedChecks = body.checks.filter(function (c) { return !c.ok; })
                                       .map(function (c) { return c.name; });
             renderTargets(body.ok);
@@ -238,155 +373,141 @@
         } catch (err) {
             showError(err.message);
         } finally {
-            preflightButton.disabled = false;
-            preflightButton.textContent = was;
+            checkButton.disabled = false;
+            checkButton.textContent = was;
         }
     }
 
-    /* ---------- stage 3: deploy ------------------------------------------ */
+    /* ---------- stage 3 -------------------------------------------------- */
 
-    function renderTargets(preflightOk) {
+    function renderTargets(checksPassed) {
         targetsHost.replaceChildren();
+        outcome.hidden = true;
+        aftermath.replaceChildren();
 
         if (release.contents.has_ui) {
-            targetsHost.appendChild(target(
-                "ui", "UI bundle", release.contents.ui, preflightOk, null));
+            targetsHost.appendChild(
+                target("ui", "UI bundle", "reverts itself", release.contents.ui, checksPassed));
         }
         if (release.contents.has_backend) {
-            targetsHost.appendChild(target(
-                "backend", "Backend wheel", release.contents.wheel, preflightOk, null));
+            targetsHost.appendChild(
+                target("backend", "Backend wheel", "migrations run on start",
+                       release.contents.wheel, checksPassed));
         }
-        if (!release.contents.has_ui && !release.contents.has_backend) {
-            targetsHost.appendChild(el("p", "hint", "This release contains nothing deployable."));
+        if (!targetsHost.children.length) {
+            targetsHost.appendChild(
+                el("p", "hint", "This release contains nothing deployable."));
         }
     }
 
-    function target(key, label, filename, preflightOk, unavailable) {
+    function target(key, label, chip, filename, checksPassed) {
         var card = el("div", "target");
-        card.append(el("p", "target-label", label));
-        card.append(el("p", "mono target-file", filename || "—"));
+        var head = el("div", "target__head");
+        head.append(el("p", "target__name", label), el("span", "chip", chip));
+        card.appendChild(head);
+        card.appendChild(el("p", "target__file", filename || "—"));
 
-        if (unavailable) {
-            card.appendChild(el("p", "notice-inline", unavailable));
-            return card;
-        }
-
-        var button = el("button", "btn btn-primary", "Deploy the " + label);
-        button.type = "button";
-        button.disabled = !preflightOk;
-        if (!preflightOk) {
-            /* Naming them matters: the checks are on the previous stage, which
-               is hidden by now, so "fix the failing checks" without saying which
-               ones sends you looking with nothing to go on. */
-            card.appendChild(el("p", "notice-inline",
+        if (!checksPassed) {
+            /* Naming them matters: the checks are on the previous stage, and
+               "fix the failing checks" without saying which sends you looking
+               with nothing to go on. */
+            card.appendChild(el("p", "note note--warn",
                 failedChecks.length
                     ? "Fix these server checks first: " + failedChecks.join(", ")
                     : "Fix the failing server checks first."));
+            return card;
         }
-        button.addEventListener("click", function () { deploy(key, button); });
-        card.appendChild(button);
+        card.appendChild(deployButton(key, label));
         return card;
     }
 
-    async function deploy(targetKey, button, confirmed) {
+    function deployButton(key, label) {
+        var button = el("button", "btn btn--go", "Deploy the " + label.toLowerCase());
+        button.type = "button";
+        button.addEventListener("click", function () { deploy(key, button, label); });
+        return button;
+    }
+
+    async function deploy(key, button, label, confirmed) {
         clearError();
+        deploying = key === "ui" ? "frontend" : "backend";
+        active = deploying;
+        unread[active] = 0;
+
         button.disabled = true;
         var was = button.textContent;
-        button.textContent = "Deploying\u2026";
+        button.textContent = "Deploying…";
         try {
-            var body = await post("/deploy", { target: targetKey, confirmed: !!confirmed });
-            renderOutcome(targetKey, body.result);
-            markDeployed(button, targetKey);
-            /* The moment you most want the server's own logs is just after a
-               deployment, so they start here rather than waiting to be asked.
-               The tool's own progress lines are not the same thing: they say
-               what was attempted, not what the service made of it. */
+            push(deploying, "=== deploying the " + label.toLowerCase() + " ===");
+            var body = await post("/deploy", { target: key, confirmed: !!confirmed });
+            renderOutcome(key, body.result);
+            markDone(button, key, label);
             await startServerLogs();
         } catch (err) {
             if (err.status === 409 && err.detail && err.detail.needs_confirmation) {
-                askToConfirm(targetKey, err.detail, button);
+                askToConfirm(key, label, err.detail, button);
             } else if (err.detail && err.detail.runbook) {
                 renderFailure(err.detail);
             } else {
                 showError(err.message);
             }
             /* Restored only on failure. Putting "Deploy" back after a success
-               invites a second one and says nothing about what just happened. */
+               invites a second one and says nothing about what happened. */
             button.disabled = false;
             button.textContent = was;
+        } finally {
+            deploying = null;
         }
     }
 
-    function markDeployed(button, targetKey) {
-        var done = el("p", "deployed", "Deployed \u2713");
+    function renderOutcome(key, result) {
+        outcome.replaceChildren();
+        if (key === "ui") {
+            fact(outcome, "Deployed", result.tarball, true);
+            fact(outcome, "HTTP", result.checks.http_status, true);
+            fact(outcome, "API_URL", result.checks.api_url, true);
+            fact(outcome, "Previous bundle", result.previous, true);
+        } else {
+            fact(outcome, "Installed", result.wheel, true);
+            fact(outcome, "Replaced version", result.previous_version || "unknown", true);
+            fact(outcome, "Migrations applied", String(result.migrations.count), true);
+            fact(outcome, "Dump", result.dump ? result.dump.path
+                                              : "none — nothing was pending", true);
+            fact(outcome, "Health",
+                 result.health.status + " after " + result.health.waited + "s", true);
+        }
+        outcome.hidden = false;
+    }
+
+    function markDone(button, key, label) {
+        var done = el("p", "done", "Deployed ✓");
         button.replaceWith(done);
         /* A redeploy is a legitimate thing to want - the same bundle over a
-           broken one, say - so it stays reachable, just not as the default. */
-        var again = el("button", "btn btn-ghost", "Deploy again");
+           broken one - so it stays reachable, just not as the default. */
+        var again = el("button", "btn btn--quiet", "Deploy again");
         again.type = "button";
         again.addEventListener("click", function () {
-            again.replaceWith(rebuildButton(targetKey));
+            again.replaceWith(deployButton(key, label));
         });
         done.after(again);
     }
 
-    function rebuildButton(targetKey) {
-        var label = targetKey === "ui" ? "UI bundle" : "Backend wheel";
-        var button = el("button", "btn btn-primary", "Deploy the " + label);
-        button.type = "button";
-        button.addEventListener("click", function () { deploy(targetKey, button); });
-        return button;
-    }
-
-    async function startServerLogs() {
-        try {
-            var body = await post("/logs/start");
-            logBox.textContent += (logBox.textContent ? "\n" : "") +
-                "--- following " + body.unit + " and the nginx logs ---";
-        } catch (err) {
-            /* Not a deployment failure. The deploy succeeded; only the log
-               stream did not start, and saying so is enough. */
-            logBox.textContent += "\n[could not start the server logs: " +
-                err.message + "]";
-        }
-        logBox.scrollTop = logBox.scrollHeight;
-    }
-
-    function renderOutcome(targetKey, result) {
-        deployFacts.replaceChildren();
-        if (targetKey === "ui") {
-            fact(deployFacts, "Deployed", result.tarball, true);
-            fact(deployFacts, "HTTP", result.checks.http_status, true);
-            fact(deployFacts, "API_URL", result.checks.api_url, true);
-            fact(deployFacts, "Previous bundle", result.previous, true);
-        } else {
-            fact(deployFacts, "Installed", result.wheel, true);
-            fact(deployFacts, "Replaced version", result.previous_version || "unknown", true);
-            fact(deployFacts, "Migrations applied", String(result.migrations.count), true);
-            fact(deployFacts, "Dump",
-                 result.dump ? result.dump.path : "none taken \u2014 nothing was pending", true);
-            fact(deployFacts, "Health",
-                 result.health.status + " after " + result.health.waited + "s", true);
-        }
-        deployFacts.hidden = false;
-    }
-
     /* A destructive migration or a dependency change cannot be undone by
        reinstalling the previous wheel, so the operator sees exactly what would
-       change and is asked once - not per reason. */
-    function askToConfirm(targetKey, detail, button) {
-        var box = el("div", "confirm");
-        box.append(el("p", "confirm-title", detail.reason));
+       change and is asked once - not once per reason. */
+    function askToConfirm(key, label, detail, button) {
+        var box = el("div", "note note--warn");
+        box.appendChild(el("p", "note__title", detail.reason));
 
         var migrations = (detail.migrations && detail.migrations.migrations) || [];
         if (migrations.length) {
-            box.appendChild(el("p", "confirm-head",
+            box.appendChild(el("p", null,
                 migrations.length + " migration(s) will apply when the service starts:"));
-            var list = el("ul", "confirm-list");
+            var list = el("ul");
             migrations.forEach(function (revision) {
                 var item = el("li", null, revision.revision + "  " + revision.slug);
                 if (revision.destructive && revision.destructive.length) {
-                    item.appendChild(el("span", "confirm-bad",
+                    item.appendChild(el("strong", null,
                         "  DESTRUCTIVE: " + revision.destructive.join(", ")));
                 }
                 list.appendChild(item);
@@ -396,26 +517,24 @@
 
         var changes = (detail.dependencies && detail.dependencies.changes) || [];
         if (changes.length) {
-            box.appendChild(el("p", "confirm-head", "Dependency changes:"));
-            var deps = el("ul", "confirm-list");
+            box.appendChild(el("p", null, "Dependency changes:"));
+            var deps = el("ul");
             changes.forEach(function (change) {
                 deps.appendChild(el("li", null,
                     change.change + ": " + change.package + " " +
-                    (change.from ? change.from + " -> " : "") + (change.to || "")));
+                    (change.from ? change.from + " → " : "") + (change.to || "")));
             });
             box.appendChild(deps);
         }
 
-        var go = el("button", "btn btn-primary", "I understand \u2014 deploy anyway");
+        var go = el("button", "btn btn--go", "I understand — deploy anyway");
         go.type = "button";
         go.addEventListener("click", function () {
             box.remove();
-            deploy(targetKey, button, true);
+            deploy(key, button, label, true);
         });
         box.appendChild(go);
-
-        deployFacts.hidden = true;
-        targetsHost.appendChild(box);
+        aftermath.replaceChildren(box);
     }
 
     /* Past the start, recovery needs the database as well as the wheel - so the
@@ -424,81 +543,94 @@
         showError(detail.message + (detail.stage ? "  (stage: " + detail.stage + ")" : ""));
         if (!detail.runbook || !detail.runbook.length) { return; }
 
-        var box = el("div", "runbook");
-        box.append(el("p", "runbook-title",
+        var box = el("div", "note note--bad");
+        box.appendChild(el("p", "note__title",
             detail.past_the_line
                 ? "The service was started, so the schema may have changed. " +
-                  "Recovery is yours to decide - these are the exact steps:"
+                  "Recovery is yours to decide — these are the exact steps:"
                 : "Recovery steps:"));
-        box.appendChild(el("pre", "runbook-body", detail.runbook.join("\n")));
-        targetsHost.appendChild(box);
+        aftermath.replaceChildren(box);
+        aftermath.appendChild(el("pre", "runbook", detail.runbook.join("\n")));
     }
 
-    /* ---------- the shared log socket ------------------------------------ */
+    async function startServerLogs() {
+        try {
+            var body = await post("/logs/start");
+            push("backend", "=== following " + body.unit + " ===", "journal");
+            push("frontend", "=== following the nginx logs ===", "nginx");
+        } catch (err) {
+            /* Not a deployment failure: the deployment succeeded, only the
+               stream did not start. */
+            push(deploying || active, "could not start the server logs: " + err.message);
+        }
+    }
 
-    function connectLog() {
-        var badge = byId("socket-badge");
-        var url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/logs";
+    /* ---------- the socket ---------------------------------------------- */
+
+    function connect() {
+        var pill = byId("pill-socket");
+        var url = (location.protocol === "https:" ? "wss://" : "ws://") +
+                  location.host + "/ws/logs";
         var socket = new WebSocket(url);
 
         socket.addEventListener("open", function () {
-            badge.textContent = "live";
-            badge.classList.add("badge-conn-on");
+            pill.textContent = "live";
+            pill.classList.add("is-on");
         });
         socket.addEventListener("close", function () {
-            badge.textContent = "disconnected";
-            badge.classList.remove("badge-conn-on");
-            /* The log is context, not the flow - a dropped socket must not
-               interrupt a deployment that is already running server-side. */
-            setTimeout(connectLog, 3000);
+            pill.textContent = "reconnecting";
+            pill.classList.remove("is-on");
+            /* The console is context, not the flow: a dropped socket must not
+               interrupt a deployment already running server-side. */
+            setTimeout(connect, 3000);
         });
         socket.addEventListener("message", function (event) {
             var payload;
             try { payload = JSON.parse(event.data); } catch (ignored) { return; }
-            if (!payload.message) { return; }
-            logBox.textContent += (logBox.textContent ? "\n" : "") + payload.message;
-            logBox.scrollTop = logBox.scrollHeight;
+            if (!payload || !payload.message) { return; }
+
+            var route = ROUTES[payload.type];
+            if (route) {
+                push(route.tab, payload.message, route.tag, route.bad);
+            } else if (deploying) {
+                push(deploying, payload.message);
+            } else {
+                /* Shared work before a deployment belongs to both stories. */
+                pushBoth(payload.message);
+            }
         });
     }
 
     /* ---------- boot ----------------------------------------------------- */
 
     verifyButton.addEventListener("click", verify);
-    preflightButton.addEventListener("click", runPreflight);
-    backButton.addEventListener("click", function () {
-        clearError();
-        goto(1);
-    });
-
-    /* Stage 3 needs a way back to stage 2. Being told to fix a check with no
-       route to reading it is a dead end. */
-    var backToChecks = el("button", "btn btn-ghost", "Back to the server checks");
-    backToChecks.type = "button";
-    backToChecks.addEventListener("click", function () {
-        clearError();
-        goto(2);
-    });
-    panels[3].appendChild(backToChecks);
+    checkButton.addEventListener("click", runChecks);
+    byId("back-1").addEventListener("click", function () { clearError(); goto(1); });
+    byId("back-2").addEventListener("click", function () { clearError(); goto(2); });
+    byId("error-dismiss").addEventListener("click", clearError);
 
     (async function boot() {
         goto(1);
+        renderTabs();
+        renderConsole();
         try {
             var body = await call("/status");
-            hostLine.textContent = body.server + "  ·  " + body.paths.ops_dir;
-            byId("mode-badge").hidden = !body.dry_run;
-            byId("live-badge").hidden = body.dry_run;
+            whereLine.textContent = body.server + "  ·  " + body.paths.ops_dir;
+            byId("pill-dry").hidden = !body.dry_run;
+            byId("pill-live").hidden = body.dry_run;
 
-            /* A verified release survives a page reload, so returning to the tab
-               should not mean verifying the same archive again. */
+            /* A verified release survives a reload, so returning to the tab
+               should not mean verifying the same bundle again. */
             if (body.release) {
                 release = body.release;
                 renderRelease();
+                pushBoth("Already verified: " + release.archive);
                 goto(2);
             }
         } catch (err) {
             showError(err.message);
         }
-        await loadBundle();
-        connectLog();
+        await loadFile();
+        connect();
     })();
 })();
