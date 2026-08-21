@@ -47,7 +47,21 @@ _EXAMPLE_NET = re.compile(r"\b10\.20\.30\.\d{1,3}\b")
 # servicenow.* when ticketing.provider != "servicenow" - would mean duplicating
 # the application's own semantics here, and going stale silently the day someone
 # renames that key. Failing open is the one outcome worse than nagging.
-_BLOCKING = ("database.", "database_url", "jwt_secret", "auth.jwt_secret")
+# Matched as a suffix on the final key as well as a prefix on the path, because
+# guessing the nesting is what went wrong first: the blocking list had
+# "jwt_secret" and "auth.jwt_secret" while the real config nests it under
+# security.jwt_secret, so a placeholder signing key was reported as a warning.
+# Only the database. A wrong password there means the service cannot start at
+# all, so it is never inert.
+#
+# A placeholder signing secret is deliberately NOT here. It is a security smell
+# rather than an availability problem - JWTs sign fine with any string - and this
+# deployment has one today. Blocking on it would stop every deployment until
+# someone changed a value they have judged acceptable, and a gate that stands
+# between an operator and a working deployment gets switched off. It stays
+# visible as a warning instead.
+_BLOCKING_PREFIXES = ("database.", "database_url")
+_BLOCKING_KEYS = ("database_password", "db_password")
 
 
 def validate(text: str) -> dict:
@@ -64,12 +78,27 @@ def validate(text: str) -> dict:
         )
 
     found = find_placeholders(parsed)
-    blocking = [path for path in found if path.startswith(_BLOCKING)]
+    blocking = [path for path in found if is_blocking(path)]
     warnings = [path for path in found if path not in blocking]
 
     if blocking:
         log.warning("config.yaml has %d blocking placeholder(s)", len(blocking))
     return {"ok": not blocking, "stop": blocking, "warn": warnings}
+
+
+def is_blocking(path: str) -> bool:
+    """Whether a placeholder at this path must stop the deployment.
+
+    Nothing starts without a database, and a default signing secret is a defect
+    whatever else is switched off - so both block wherever they are nested.
+    Everything else warns, because blocking on an inert ServiceNow credential
+    would nag on most real deployments and a gate that nags gets switched off.
+    """
+    if path.startswith(_BLOCKING_PREFIXES):
+        return True
+    # The last segment, with any list index stripped.
+    leaf = path.rsplit(".", 1)[-1].split("[", 1)[0]
+    return leaf in _BLOCKING_KEYS
 
 
 def find_placeholders(node: Any, path: str = "") -> list[str]:

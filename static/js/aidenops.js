@@ -18,7 +18,6 @@
     var stepper = byId("stepper");
     var panels = { 1: byId("panel-1"), 2: byId("panel-2"), 3: byId("panel-3") };
     var bundleLine = byId("bundle");
-    var fetchButton = byId("fetch");
     var incomingHint = byId("incoming-hint");
     var checksumInput = byId("checksum");
     var verifyButton = byId("verify");
@@ -149,42 +148,43 @@
 
     /* Downloading is optional: copying the file into the incoming folder by
        hand lands it in exactly the same place, and everything after this point
-       is identical either way. The hash is not checked here - this only puts
-       bytes on disk. Verify is the gate. */
-    async function fetchFromHub() {
-        clearError();
-        fetchButton.disabled = true;
-        var was = fetchButton.textContent;
-        fetchButton.textContent = "Downloading\u2026";
-        try {
-            var body = await post("/fetch");
-            if (body.simulated) {
-                showError("Dry run: the download was simulated, so nothing was " +
-                          "written. Copy the bundle in by hand to rehearse the rest.");
-            }
-            await loadBundle();
-        } catch (err) {
-            showError(err.message);
-        } finally {
-            fetchButton.disabled = false;
-            fetchButton.textContent = was;
-        }
-    }
+    /* One action, two steps. Downloading and verifying were separate buttons,
+       which made the sequence something the operator had to remember rather
+       than something the tool does.
 
+       The download is best effort on purpose: if the hub is unreachable but the
+       bundle was copied in by hand, that is a working path and should not be
+       turned into a failure. Either way the pasted code decides, so a stale
+       local file cannot slip through - it simply fails to match. */
     async function verify() {
         clearError();
         verifyButton.disabled = true;
         var was = verifyButton.textContent;
-        verifyButton.textContent = "Verifying…";
+        var note = "";
+
         try {
+            verifyButton.textContent = "Downloading\u2026";
+            var fetched = await post("/fetch");
+            if (fetched.simulated) {
+                note = "Dry run: the download was simulated, so the file already " +
+                       "in the incoming folder is what was verified.";
+            }
+        } catch (err) {
+            note = "Could not download from the hub (" + err.message +
+                   "). Verified the file already in the incoming folder.";
+        }
+
+        try {
+            verifyButton.textContent = "Verifying\u2026";
+            await loadBundle();
             var body = await post("/verify", { checksum: checksumInput.value });
             release = body.release;
             renderRelease();
             preflightList.replaceChildren();
+            if (note) { showError(note); }
             goto(2);
         } catch (err) {
-            /* The hash gate has no override, so the message is the whole story. */
-            showError(err.message);
+            showError(note ? note + "  " + err.message : err.message);
         } finally {
             verifyButton.disabled = false;
             verifyButton.textContent = was;
@@ -422,7 +422,6 @@
     /* ---------- boot ----------------------------------------------------- */
 
     verifyButton.addEventListener("click", verify);
-    fetchButton.addEventListener("click", fetchFromHub);
     preflightButton.addEventListener("click", runPreflight);
     backButton.addEventListener("click", function () {
         clearError();

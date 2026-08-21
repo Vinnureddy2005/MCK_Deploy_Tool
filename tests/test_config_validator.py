@@ -126,9 +126,15 @@ def test_a_database_placeholder_blocks():
     assert result["ok"] is False
 
 
-def test_a_jwt_secret_placeholder_blocks():
-    result = validate('auth:\n  jwt_secret: "ChangeMe"\n')
-    assert result["stop"] == ["auth.jwt_secret"]
+def test_a_jwt_secret_placeholder_warns_but_does_not_block():
+    """A security smell, not an availability problem: JWTs sign fine with any
+    string, and this deployment has a placeholder one today. Blocking would
+    stand between an operator and a working deployment until someone changed a
+    value they have judged acceptable - and that gate gets switched off."""
+    result = validate('security:\n  jwt_secret: "ChangeMe"\n')
+    assert result["stop"] == []
+    assert result["warn"] == ["security.jwt_secret"]
+    assert result["ok"] is True
 
 
 def test_an_optional_integration_placeholder_only_warns():

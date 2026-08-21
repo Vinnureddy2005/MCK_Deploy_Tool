@@ -191,8 +191,11 @@ async def preflight() -> dict:
 
         unit = await ssh.run(["systemctl", "is-active", config.settings.aidenops_unit],
                              sudo=True, check=False)
+        state = (unit.stdout or "").strip() or "unknown"
+        # Reported, never blocking. A stopped service is the situation you most
+        # need this tool for.
         checks.append({"name": config.settings.aidenops_unit, "ok": True,
-                       "detail": (unit.stdout or "").strip() or "unknown"})
+                       "detail": state, "info": True})
 
         health = await ssh.run(
             ["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}",
@@ -200,31 +203,54 @@ async def preflight() -> dict:
             sudo=False, check=False,
         )
         code = (health.stdout or "").strip()
-        checks.append({"name": "backend /health", "ok": code in ("200", ""),
-                       "detail": code or "(dry run)"})
+        # Also informational. It was blocking, which refused a deployment
+        # precisely when the backend was down - backwards. What the answer is
+        # good for is attributing a later failure: if it was already broken
+        # beforehand, the deployment did not break it. The real gate is the
+        # health poll after the service starts.
+        checks.append({
+            "name": "backend /health",
+            "ok": True,
+            "info": True,
+            "detail": ("200" if code == "200"
+                       else f"not answering ({code or 'no response'}) - "
+                            f"service is {state}"),
+        })
 
         # Both volumes, because they are different ones and both matter: the
         # database and the dumps live on /home/AidenAI, while the UI bundle goes
         # to /var/www - and /var is the volume that has already filled once.
-        for label, path in (("disk /home/AidenAI", config.settings.aidenops_backup_root),
+        margin = config.settings.aidenops_disk_margin_mb
+        # Measured against directories that exist. The backup root is created by
+        # the deployment itself, so df against it fails on a first run - and that
+        # failure was being reported as "(dry run)", which is a different thing
+        # entirely and hid it.
+        for label, path in (("disk /home/AidenAI", "/home/AidenAI"),
                             ("disk /var/www", config.settings.aidenops_web_root)):
             disk = await ssh.run(["df", "-Pk", path], sudo=True, check=False)
             lines = (disk.stdout or "").strip().splitlines()
             fields = lines[-1].split() if len(lines) > 1 else []
-            free_mb = int(fields[3]) // 1024 if len(fields) > 3 and fields[3].isdigit() else None
-            margin = config.settings.aidenops_disk_margin_mb
-            checks.append({
-                "name": label,
-                # None means it could not be measured - a dry run - which is not
-                # the same as being out of space and must not read as a failure.
-                "ok": free_mb is None or free_mb >= margin,
-                "detail": f"{free_mb} MB free (need {margin} MB)" if free_mb is not None
-                          else "(dry run)",
-            })
+            free_mb = (int(fields[3]) // 1024
+                       if len(fields) > 3 and fields[3].isdigit() else None)
+
+            if disk.simulated:
+                detail, ok = "(dry run - not measured)", True
+            elif free_mb is None:
+                # Not "fine by default": a df that produced nothing is a real
+                # failure, and calling it unmeasurable would hide it.
+                detail, ok = f"could not measure {path}", False
+            else:
+                detail = f"{free_mb} MB free (need {margin} MB)"
+                ok = free_mb >= margin
+            checks.append({"name": label, "ok": ok, "detail": detail})
     except Exception as exc:
         raise _handle(exc) from exc
 
-    return {"ok": all(c["ok"] for c in checks), "checks": checks}
+    # Informational rows never gate a deployment; only real failures do.
+    return {
+        "ok": all(c["ok"] for c in checks if not c.get("info")),
+        "checks": checks,
+    }
 
 
 async def _read(ssh, path: str) -> str | None:
