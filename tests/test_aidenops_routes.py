@@ -27,7 +27,7 @@ UI = "aidenops-ui-1.0.0+g635405c.tar.gz"
 BODIES = {WHEEL: b"wheel", REQS: b"fastapi==0.115.0\n", UI: b"tarball"}
 
 
-def _archive(directory, name="aidenops-d00222c-635405c.zip", bodies=None):
+def _archive(directory, name="opsBinaries.zip", bodies=None):
     bodies = BODIES if bodies is None else bodies
     path = directory / name
     sums = "".join(
@@ -61,29 +61,46 @@ def incoming(tmp_path, monkeypatch):
     config.reload_settings()
 
 
-# --- listing ---------------------------------------------------------------
+# --- the bundle is reported, not chosen -----------------------------------
 
 
-def test_the_incoming_folder_is_listed(incoming):
+def test_the_bundle_is_reported_when_present(incoming):
     _archive(incoming)
-    body = client.get("/api/aidenops/archives").json()
+    body = client.get("/api/aidenops/bundle").json()
 
-    assert [a["name"] for a in body["archives"]] == ["aidenops-d00222c-635405c.zip"]
+    assert body["present"] is True
+    assert body["name"] == "opsBinaries.zip"
+    assert body["size"] > 0
     assert body["incoming_dir"] == str(incoming)
 
 
-def test_an_empty_folder_is_not_an_error(incoming):
-    body = client.get("/api/aidenops/archives").json()
-    assert body["archives"] == []
+def test_a_missing_bundle_is_reported_not_an_error(incoming):
+    """Nothing copied yet is a normal state to show, not a failure."""
+    body = client.get("/api/aidenops/bundle").json()
+
+    assert body["present"] is False
+    assert body["name"] == "opsBinaries.zip"
 
 
-def test_only_zips_are_offered(incoming):
-    _archive(incoming)
-    (incoming / "notes.txt").write_text("x", encoding="utf-8")
-    (incoming / "other.tar.gz").write_bytes(b"x")
+def test_other_zips_in_the_folder_are_ignored(incoming):
+    """There is one name. A leftover from some other purpose is not offered,
+    because nothing is being offered."""
+    _archive(incoming, name="something-else.zip")
+    assert client.get("/api/aidenops/bundle").json()["present"] is False
 
-    names = [a["name"] for a in client.get("/api/aidenops/archives").json()["archives"]]
-    assert names == ["aidenops-d00222c-635405c.zip"]
+
+def test_the_filename_is_not_a_request_parameter(incoming):
+    """Accepting a name would only add a way to point this at the wrong file."""
+    from app.routes.aidenops import VerifyRequest
+
+    assert set(VerifyRequest.model_fields) == {"checksum"}
+
+
+def test_verifying_without_the_bundle_says_where_to_put_it(incoming):
+    response = client.post("/api/aidenops/verify", json={"checksum": "a" * 64})
+
+    assert response.status_code == 400
+    assert "Copy the release bundle there first" in response.json()["detail"]
 
 
 # --- verification ----------------------------------------------------------
@@ -92,7 +109,7 @@ def test_only_zips_are_offered(incoming):
 def test_a_matching_archive_verifies(incoming):
     path = _archive(incoming)
     response = client.post("/api/aidenops/verify",
-                           json={"archive": path.name, "checksum": _sha256(path)})
+                           json={"checksum": _sha256(path)})
 
     assert response.status_code == 200
     release = response.json()["release"]
@@ -109,7 +126,7 @@ def test_a_hash_pasted_in_blocks_is_accepted(incoming):
     spaced = " ".join(digest[i:i + 8] for i in range(0, 64, 8))
 
     assert client.post("/api/aidenops/verify",
-                       json={"archive": path.name, "checksum": spaced}).status_code == 200
+                       json={"checksum": spaced}).status_code == 200
 
 
 def test_a_mismatched_archive_is_refused_and_not_retained(incoming):
@@ -117,7 +134,7 @@ def test_a_mismatched_archive_is_refused_and_not_retained(incoming):
     reach it."""
     path = _archive(incoming)
     response = client.post("/api/aidenops/verify",
-                           json={"archive": path.name, "checksum": "b" * 64})
+                           json={"checksum": "b" * 64})
 
     assert response.status_code == 400
     assert "does not match the checksum" in response.json()["detail"]
@@ -127,40 +144,21 @@ def test_a_mismatched_archive_is_refused_and_not_retained(incoming):
 def test_a_previously_verified_release_is_forgotten_on_a_failure(incoming):
     """A good release must not survive a subsequent bad one and get deployed."""
     path = _archive(incoming)
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+    client.post("/api/aidenops/verify", json={"checksum": _sha256(path)})
     assert client.get("/api/aidenops/status").json()["release"] is not None
 
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": "c" * 64})
+    client.post("/api/aidenops/verify", json={"checksum": "c" * 64})
     assert client.get("/api/aidenops/status").json()["release"] is None
 
 
-@pytest.mark.parametrize(
-    "name",
-    ["../../../etc/passwd", "..\\\\windows\\\\x.zip", "a.zip; id", "-rf.zip", "x.whl", ""],
-)
-def test_unsafe_archive_names_are_refused(incoming, name):
-    response = client.post("/api/aidenops/verify", json={"archive": name, "checksum": "a" * 64})
-    assert response.status_code == 400
-
-
-def test_an_archive_outside_the_folder_is_refused(incoming, tmp_path):
-    """Resolving and re-checking the parent is what closes this, not the name
-    pattern alone."""
-    outside = _archive(tmp_path, name="elsewhere.zip")
-    response = client.post("/api/aidenops/verify",
-                           json={"archive": outside.name, "checksum": _sha256(outside)})
-
-    assert response.status_code == 400
-    assert "not in" in response.json()["detail"]
-
-
 def test_a_missing_sums_file_is_refused(incoming):
-    path = incoming / "aidenops-broken.zip"
+    # Must carry the expected name, since that is the only file verify looks at.
+    path = incoming / "opsBinaries.zip"
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr(UI, b"tarball")
 
     response = client.post("/api/aidenops/verify",
-                           json={"archive": path.name, "checksum": _sha256(path)})
+                           json={"checksum": _sha256(path)})
     assert response.status_code == 400
     assert "cannot be verified" in response.json()["detail"]
 
@@ -178,7 +176,7 @@ def test_the_backend_target_is_accepted(incoming):
     """It is implemented now, so it must not be refused as unavailable. Whatever
     happens next is a server outcome, not a missing feature."""
     path = _archive(incoming)
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+    client.post("/api/aidenops/verify", json={"checksum": _sha256(path)})
 
     response = client.post("/api/aidenops/deploy", json={"target": "backend"})
     assert response.status_code != 501
@@ -186,7 +184,7 @@ def test_the_backend_target_is_accepted(incoming):
 
 def test_a_release_without_a_wheel_cannot_deploy_the_backend(incoming):
     path = _archive(incoming, bodies={UI: BODIES[UI]})
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+    client.post("/api/aidenops/verify", json={"checksum": _sha256(path)})
 
     response = client.post("/api/aidenops/deploy", json={"target": "backend"})
     assert response.status_code == 400
@@ -195,7 +193,7 @@ def test_a_release_without_a_wheel_cannot_deploy_the_backend(incoming):
 
 def test_a_release_without_a_ui_cannot_deploy_one(incoming):
     path = _archive(incoming, bodies={WHEEL: BODIES[WHEEL], REQS: BODIES[REQS]})
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+    client.post("/api/aidenops/verify", json={"checksum": _sha256(path)})
 
     response = client.post("/api/aidenops/deploy", json={"target": "ui"})
     assert response.status_code == 400
@@ -204,7 +202,7 @@ def test_a_release_without_a_ui_cannot_deploy_one(incoming):
 
 def test_an_unknown_target_is_refused(incoming):
     path = _archive(incoming)
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+    client.post("/api/aidenops/verify", json={"checksum": _sha256(path)})
 
     assert client.post("/api/aidenops/deploy",
                        json={"target": "database"}).status_code == 400
@@ -212,7 +210,7 @@ def test_an_unknown_target_is_refused(incoming):
 
 def test_clearing_forgets_the_release(incoming):
     path = _archive(incoming)
-    client.post("/api/aidenops/verify", json={"archive": path.name, "checksum": _sha256(path)})
+    client.post("/api/aidenops/verify", json={"checksum": _sha256(path)})
 
     client.post("/api/aidenops/clear")
     assert client.get("/api/aidenops/status").json()["release"] is None

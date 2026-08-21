@@ -154,6 +154,11 @@ class Settings:
     # tool's dependencies, on a machine whose PyPI access is exactly the
     # thing we cannot rely on.
     aidenops_incoming_dir: Path = field(default_factory=lambda: BASE_DIR / "incoming")
+    # The Aiden tool always publishes under this name, so there is exactly one
+    # file to look for and nothing to choose. The trade is that the filename
+    # identifies nothing - every release is called this - which makes the
+    # pasted hash the only identifier rather than a second opinion.
+    aidenops_bundle_name: str = "opsBinaries.zip"
     aidenops_health_url: str = "http://localhost:8000/health"
     aidenops_ui_url: str = "http://localhost:8080/"
     # nginx, not the app. Both observed UI failures on this server were
@@ -229,6 +234,7 @@ class Settings:
             aidenops_backup_root=_env("AIDENOPS_BACKUP_ROOT", "/home/AidenAI/backups"),
             aidenops_web_root=_env("AIDENOPS_WEB_ROOT", "/var/www/aidenops"),
             aidenops_incoming_dir=incoming if incoming.is_absolute() else BASE_DIR / incoming,
+            aidenops_bundle_name=_env("AIDENOPS_BUNDLE_NAME", "opsBinaries.zip"),
             aidenops_health_url=_env("AIDENOPS_HEALTH_URL", "http://localhost:8000/health"),
             aidenops_ui_url=_env("AIDENOPS_UI_URL", "http://localhost:8080/"),
             aidenops_nginx_error_log=_env("AIDENOPS_NGINX_ERROR_LOG",

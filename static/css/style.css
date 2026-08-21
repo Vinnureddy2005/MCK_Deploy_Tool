@@ -471,3 +471,25 @@ textarea.control { resize: vertical; word-break: break-all; font-family: var(--m
   word-break: break-word;
   overflow-x: auto;
 }
+
+/* ---- the release bundle, reported rather than chosen ---- */
+
+.bundle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 9px 12px;
+  background: var(--sunken);
+  border: 1px solid var(--line-firm);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.bundle-meta { color: var(--ink-soft); font-size: 12px; }
+
+.bundle-missing {
+  background: var(--warn-wash);
+  border-color: var(--warn);
+  color: var(--warn);
+}

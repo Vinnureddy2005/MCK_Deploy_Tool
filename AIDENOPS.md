@@ -28,17 +28,25 @@ reinstalling the previous wheel does not undo a migration.
 
 ## Before you start
 
-**1. The archive.** The Aiden tool produces one file per release:
+**1. The bundle.** The Aiden tool always publishes under one name:
 
 ```
-aidenops-d00222c-635405c.zip
+opsBinaries.zip
 ```
 
-Copy it into the tool's `incoming/` folder on the VDI. The page lists what it
-finds there — you do not type a path.
+Copy it into the tool's `incoming/` folder on the VDI. The page shows the file it
+found with its size and the time it was copied — there is nothing to choose, and
+no path to type.
+
+The fixed name keeps the hub URL constant and matches the handover bundle
+already on that server. It also means **the filename identifies nothing**: every
+release is called this. Which is exactly why the code below is not a
+double-check but the only way to tell one release from another.
 
 **2. The code.** One SHA-256, shown by the Aiden tool in blocks of eight. Paste
-it as shown; spaces and case do not matter.
+it as shown; spaces and case do not matter. If it does not match, the deployment
+stops there and nothing is sent - there is no override, because with a fixed
+filename nothing else could tell you that you have the wrong release.
 
 **3. `.env`.** The AidenOps defaults match this server and normally need no
 change. See [Settings](#settings) if a path ever moves.
@@ -199,6 +207,7 @@ Defaults match this server. Override in `.env` only if something moves.
 | `AIDENOPS_BACKUP_ROOT` | `/home/AidenAI/backups` |
 | `AIDENOPS_WEB_ROOT` | `/var/www/aidenops` |
 | `AIDENOPS_INCOMING_DIR` | `incoming` (relative to the tool) |
+| `AIDENOPS_BUNDLE_NAME` | `opsBinaries.zip` |
 | `AIDENOPS_HEALTH_URL` | `http://localhost:8000/health` |
 | `AIDENOPS_UI_URL` | `http://localhost:8080/` |
 | `AIDENOPS_HEALTH_TIMEOUT` | `600` |

@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/aidenops", tags=["aidenops"])
 
 class VerifyRequest(BaseModel):
-    archive: str = Field(..., max_length=256)
+    # The filename is not a parameter. There is one bundle name, so accepting a
+    # name would only add a way to point this at the wrong file.
     checksum: str = Field(..., max_length=512)
 
 
@@ -72,40 +73,55 @@ async def status() -> dict:
     }
 
 
-@router.get("/archives")
-async def archives() -> dict:
-    """Release archives waiting in the incoming folder, newest first."""
+@router.get("/bundle")
+async def bundle() -> dict:
+    """The release bundle waiting to be verified, if it is there.
+
+    Reported rather than chosen: the Aiden tool always publishes under one name,
+    so there is nothing to pick. The size and timestamp are here so it is
+    obvious whether the file was copied today or a fortnight ago.
+    """
     incoming = config.settings.aidenops_incoming_dir
     incoming.mkdir(parents=True, exist_ok=True)
+    path = incoming / config.settings.aidenops_bundle_name
 
-    found = []
-    for path in sorted(incoming.glob("*.zip"), key=lambda p: p.stat().st_mtime, reverse=True):
-        found.append({
-            "name": path.name,
-            "size": path.stat().st_size,
-            "modified": int(path.stat().st_mtime),
-        })
-    return {"incoming_dir": str(incoming), "archives": found}
+    if not path.is_file():
+        return {
+            "incoming_dir": str(incoming),
+            "name": config.settings.aidenops_bundle_name,
+            "present": False,
+        }
+    stat = path.stat()
+    return {
+        "incoming_dir": str(incoming),
+        "name": path.name,
+        "present": True,
+        "size": stat.st_size,
+        "modified": int(stat.st_mtime),
+    }
 
 
 @router.post("/verify")
 async def verify(request: VerifyRequest) -> dict:
-    """Verify an archive from the incoming folder. Nothing touches the server.
+    """Verify the bundle in the incoming folder. Nothing touches the server.
 
     Both checks run here on the VDI: the archive against the hand-carried hash,
     and its members against the SHA256SUMS.txt inside it. A release that fails
-    is not retained, so it cannot be reached by the deploy endpoint.
+    is not retained, so the deploy endpoint has no path to it.
     """
     try:
-        name = validate_release_archive(request.archive)
+        name = validate_release_archive(config.settings.aidenops_bundle_name)
         incoming = config.settings.aidenops_incoming_dir.resolve()
         candidate = (incoming / name).resolve()
-        # Belt and braces: the name is already validated, but resolving and
-        # re-checking the parent means no symlink or edge case escapes the folder.
+        # The name comes from configuration rather than the request now, but it
+        # is still resolved and re-checked: a symlink in the incoming folder
+        # should not be able to point outside it.
         if candidate.parent != incoming:
-            raise ValidationError(f"{name} is not in the incoming folder.")
+            raise ValidationError(f"{name} does not resolve inside {incoming}.")
         if not candidate.is_file():
-            raise ValidationError(f"{name} is not in {incoming}.")
+            raise ValidationError(
+                f"{name} is not in {incoming}. Copy the release bundle there first."
+            )
 
         release = aidenops_release.verify(candidate, request.checksum)
     except Exception as exc:

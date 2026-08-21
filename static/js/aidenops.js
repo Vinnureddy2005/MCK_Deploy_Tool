@@ -17,7 +17,7 @@
     var byId = document.getElementById.bind(document);
     var stepper = byId("stepper");
     var panels = { 1: byId("panel-1"), 2: byId("panel-2"), 3: byId("panel-3") };
-    var archiveSelect = byId("archive");
+    var bundleLine = byId("bundle");
     var incomingHint = byId("incoming-hint");
     var checksumInput = byId("checksum");
     var verifyButton = byId("verify");
@@ -110,28 +110,39 @@
 
     /* ---------- stage 1: verify ------------------------------------------ */
 
-    async function loadArchives() {
+    /* One name, so this reports rather than offers a choice. The size and
+       timestamp are the useful part: they show whether the file on this machine
+       is the one that was just built or last fortnight's. */
+    async function loadBundle() {
         try {
-            var data = await call("/archives");
-            incomingHint.textContent = "Copy the archive into " + data.incoming_dir;
-            archiveSelect.replaceChildren();
+            var data = await call("/bundle");
+            incomingHint.textContent = "Copy the bundle into " + data.incoming_dir;
 
-            if (!data.archives.length) {
-                archiveSelect.appendChild(el("option", null, "no archives found"));
-                archiveSelect.disabled = true;
+            if (!data.present) {
+                bundleLine.textContent = data.name + " is not there yet";
+                bundleLine.className = "bundle bundle-missing";
                 verifyButton.disabled = true;
                 return;
             }
-            data.archives.forEach(function (entry) {
-                var option = el("option", null, entry.name + "  ·  " + bytes(entry.size));
-                option.value = entry.name;
-                archiveSelect.appendChild(option);
-            });
-            archiveSelect.disabled = false;
+            bundleLine.replaceChildren(
+                el("span", "mono", data.name),
+                el("span", "bundle-meta",
+                   bytes(data.size) + "  ·  copied " + when(data.modified))
+            );
+            bundleLine.className = "bundle";
             verifyButton.disabled = false;
         } catch (err) {
             showError(err.message);
         }
+    }
+
+    /* Local time here, unlike the IST-pinned server timestamps: this is when the
+       file landed on the machine you are sitting at. */
+    function when(epochSeconds) {
+        if (!epochSeconds) { return "unknown"; }
+        return new Date(epochSeconds * 1000).toLocaleString([], {
+            day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit"
+        });
     }
 
     async function verify() {
@@ -140,10 +151,7 @@
         var was = verifyButton.textContent;
         verifyButton.textContent = "Verifying…";
         try {
-            var body = await post("/verify", {
-                archive: archiveSelect.value,
-                checksum: checksumInput.value
-            });
+            var body = await post("/verify", { checksum: checksumInput.value });
             release = body.release;
             renderRelease();
             preflightList.replaceChildren();
@@ -405,7 +413,7 @@
         } catch (err) {
             showError(err.message);
         }
-        await loadArchives();
+        await loadBundle();
         connectLog();
     })();
 })();
