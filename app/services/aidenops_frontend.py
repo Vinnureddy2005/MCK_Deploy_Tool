@@ -168,6 +168,24 @@ class FrontendDeployer:
         """The tarball unpacks as UID 4096, and nginx must be able to traverse."""
         await self._log("Setting ownership and permissions")
         await self._run(["chown", "-R", "root:root", f"{self.web}/dist-new"], stage="own")
+
+        # The tarball's own modes are not trustworthy. A bundle built on Windows
+        # carries no POSIX modes, so Python's tarfile records something
+        # permissive and the extracted tree came out 777 - world-writable, which
+        # on this server means any local account could replace the UI.
+        #
+        # Set them here rather than relying on the archive: this holds whoever
+        # built it and on whatever platform.
+        await self._run(
+            ["find", f"{self.web}/dist-new", "-type", "d", "-exec",
+             "chmod", "755", "{}", "+"],
+            stage="own",
+        )
+        await self._run(
+            ["find", f"{self.web}/dist-new", "-type", "f", "-exec",
+             "chmod", "644", "{}", "+"],
+            stage="own",
+        )
         # 0750 from root's umask 027 makes nginx return 500, not 403 - which
         # sends you looking in entirely the wrong place.
         await self._run(["chmod", "755", self.web], stage="own")

@@ -319,3 +319,25 @@ async def test_a_failing_step_names_the_stage(ssh, dry_settings):
 
     assert caught.value.stage == "own"
     assert caught.value.reverted is False
+
+
+# --- modes are not taken on trust ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_modes_are_normalised_after_extraction(deployer, ssh):
+    """A bundle built on Windows carries no POSIX modes, so tarfile records
+    something permissive - the first real deployment extracted as 777, which on
+    this server means any local account could replace the UI."""
+    await deployer.deploy(TARBALL, now=WHEN)
+
+    assert ssh.ran("find", f"{WEB}/dist-new", "-type", "d", "chmod", "755")
+    assert ssh.ran("find", f"{WEB}/dist-new", "-type", "f", "chmod", "644")
+
+
+@pytest.mark.asyncio
+async def test_modes_are_set_before_the_swap(deployer, ssh):
+    """Otherwise the live directory is briefly world-writable."""
+    await deployer.deploy(TARBALL, now=WHEN)
+
+    assert ssh.index_of("chmod", "644") < ssh.index_of("sh", "mv")
