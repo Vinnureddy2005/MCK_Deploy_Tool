@@ -502,3 +502,15 @@ textarea.control { resize: vertical; word-break: break-all; font-family: var(--m
 }
 
 .bundle-actions .hint { margin: 0; }
+
+.deployed {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--ok-wash);
+  border: 1px solid var(--ok);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ok);
+  align-self: flex-start;
+}

@@ -292,10 +292,16 @@
         clearError();
         button.disabled = true;
         var was = button.textContent;
-        button.textContent = "Deploying…";
+        button.textContent = "Deploying\u2026";
         try {
             var body = await post("/deploy", { target: targetKey, confirmed: !!confirmed });
             renderOutcome(targetKey, body.result);
+            markDeployed(button, targetKey);
+            /* The moment you most want the server's own logs is just after a
+               deployment, so they start here rather than waiting to be asked.
+               The tool's own progress lines are not the same thing: they say
+               what was attempted, not what the service made of it. */
+            await startServerLogs();
         } catch (err) {
             if (err.status === 409 && err.detail && err.detail.needs_confirmation) {
                 askToConfirm(targetKey, err.detail, button);
@@ -304,10 +310,46 @@
             } else {
                 showError(err.message);
             }
-        } finally {
+            /* Restored only on failure. Putting "Deploy" back after a success
+               invites a second one and says nothing about what just happened. */
             button.disabled = false;
             button.textContent = was;
         }
+    }
+
+    function markDeployed(button, targetKey) {
+        var done = el("p", "deployed", "Deployed \u2713");
+        button.replaceWith(done);
+        /* A redeploy is a legitimate thing to want - the same bundle over a
+           broken one, say - so it stays reachable, just not as the default. */
+        var again = el("button", "btn btn-ghost", "Deploy again");
+        again.type = "button";
+        again.addEventListener("click", function () {
+            again.replaceWith(rebuildButton(targetKey));
+        });
+        done.after(again);
+    }
+
+    function rebuildButton(targetKey) {
+        var label = targetKey === "ui" ? "UI bundle" : "Backend wheel";
+        var button = el("button", "btn btn-primary", "Deploy the " + label);
+        button.type = "button";
+        button.addEventListener("click", function () { deploy(targetKey, button); });
+        return button;
+    }
+
+    async function startServerLogs() {
+        try {
+            var body = await post("/logs/start");
+            logBox.textContent += (logBox.textContent ? "\n" : "") +
+                "--- following " + body.unit + " and the nginx logs ---";
+        } catch (err) {
+            /* Not a deployment failure. The deploy succeeded; only the log
+               stream did not start, and saying so is enough. */
+            logBox.textContent += "\n[could not start the server logs: " +
+                err.message + "]";
+        }
+        logBox.scrollTop = logBox.scrollHeight;
     }
 
     function renderOutcome(targetKey, result) {
