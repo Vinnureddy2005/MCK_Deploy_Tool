@@ -146,6 +146,10 @@ class Settings:
     # Restarting either reports success and changes nothing.
     aidenops_ops_dir: str = "/home/AidenAI/ops1"
     aidenops_venv: str = "/home/AidenAI/ops1/venv"
+    # Where the bundle ends up before it is installed. Root-owned, so SFTP
+    # cannot write here directly - SFTP is a protocol and cannot use sudo. The
+    # upload lands in CopyData under the SSH user's own home first and is copied
+    # across with sudo, exactly as the JAR flow has always done.
     aidenops_staging_dir: str = "/home/AidenAI/ops1/staging"
     aidenops_backup_root: str = "/home/AidenAI/backups"
     aidenops_web_root: str = "/var/www/aidenops"
@@ -230,7 +234,8 @@ class Settings:
             aidenops_unit=_env("AIDENOPS_UNIT", "aidenops.service"),
             aidenops_ops_dir=_env("AIDENOPS_OPS_DIR", "/home/AidenAI/ops1"),
             aidenops_venv=_env("AIDENOPS_VENV", "/home/AidenAI/ops1/venv"),
-            aidenops_staging_dir=_env("AIDENOPS_STAGING_DIR", "/home/AidenAI/ops1/staging"),
+            aidenops_staging_dir=_env("AIDENOPS_STAGING_DIR",
+                                      "/home/AidenAI/ops1/staging"),
             aidenops_backup_root=_env("AIDENOPS_BACKUP_ROOT", "/home/AidenAI/backups"),
             aidenops_web_root=_env("AIDENOPS_WEB_ROOT", "/var/www/aidenops"),
             aidenops_incoming_dir=incoming if incoming.is_absolute() else BASE_DIR / incoming,

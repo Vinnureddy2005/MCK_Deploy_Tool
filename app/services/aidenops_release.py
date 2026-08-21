@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.config import Settings, validate_release_archive
+from app.config import Settings, copydata_dir, validate_release_archive
 from app.config import settings as default_settings
 from app.services import archive_service
 from app.services.sftp_service import SFTPService
@@ -150,31 +150,46 @@ class ReleaseStager:
             await self._emit(message)
 
     async def stage(self, release: VerifiedRelease) -> dict:
-        staging = self.settings.aidenops_staging_dir
-        await self._log(f"Creating {staging}")
-        # Not assumed to exist - it does not, on a server that has never had a
-        # tool-driven deployment.
-        await self._run(["mkdir", "-p", staging])
+        """Upload into CopyData, then copy across into the root-owned staging.
 
-        await self._log(f"Uploading {release.archive} ({release.size} bytes)")
+        The same two hops the JAR flow makes, and for the same reason: SFTP
+        cannot use sudo, so it can only write somewhere the SSH user owns.
+        /home/AidenAI/ops1 is root-owned and closed to that account, so a direct
+        upload fails with EACCES no matter what the mkdir did.
+
+        Dated CopyData folder, matching the JAR convention - so everything that
+        was ever uploaded to this server sits in one predictable place.
+        """
+        landing = copydata_dir()
+        staging = self.settings.aidenops_staging_dir
+        name = release.archive
+
+        await self._log(f"Uploading {name} ({release.size} bytes) to {landing}")
         result = await self.sftp.upload_release(
-            release.local_path, staging, release.archive, progress=self._emit
+            release.local_path, landing, name, progress=self._emit
         )
 
-        landed = await self._remote_sha256(f"{staging}/{release.archive}")
+        # Hashed where it landed, before anything is copied. A transfer that
+        # arrived wrong should be caught at the point it arrived.
+        landed = await self._remote_sha256(f"{landing}/{name}")
         if landed and landed != release.sha256:
             raise ReleaseError(
-                f"{release.archive} uploaded but the copy on the server hashes "
-                f"differently.\n  local:  {release.sha256}\n  server: {landed}\n"
-                "Nothing has been unpacked. Re-run the upload."
+                f"{name} uploaded but the copy on the server hashes differently.\n"
+                f"  local:  {release.sha256}\n  server: {landed}\n"
+                "Nothing has been copied onward. Re-run the upload."
             )
         await self._log("Upload verified against the local hash")
 
-        await self._log("Unpacking into staging")
-        await self._run(["unzip", "-o", f"{staging}/{release.archive}", "-d", staging])
+        await self._log(f"Copying into {staging}")
+        await self._run(["mkdir", "-p", staging])
+        await self._run(["cp", f"{landing}/{name}", f"{staging}/{name}"])
 
-        release.staged_path = f"{staging}/{release.archive}"
+        await self._log("Unpacking")
+        await self._run(["unzip", "-o", f"{staging}/{name}", "-d", staging])
+
+        release.staged_path = f"{staging}/{name}"
         return {
+            "landing_path": f"{landing}/{name}",
             "staged_path": release.staged_path,
             "size": result.size_bytes,
             "simulated": result.simulated,
@@ -189,8 +204,8 @@ class ReleaseStager:
             return ""
         return (result.stdout or "").split(maxsplit=1)[0].strip().lower()
 
-    async def _run(self, argv: list[str]):
+    async def _run(self, argv: list[str], *, sudo: bool = True):
         try:
-            return await self.ssh.run(argv, sudo=True)
+            return await self.ssh.run(argv, sudo=sudo)
         except CommandFailed as exc:
             raise ReleaseError(f"{argv[0]} failed: {exc.result.output[:400]}") from exc

@@ -90,6 +90,23 @@ cannot leave an older one quietly deployable.
 - the unit's current state, and whether `/health` answers now
 - free space on **both** volumes — `/home/AidenAI` and `/var/www`
 
+### How the bundle reaches the server
+
+Two hops, the same as the JAR flow:
+
+```
+SFTP  ──►  /home/day6sio/CopyData/Aug21/opsBinaries.zip     day6sio owns this
+           │  hashed here, before anything moves
+sudo cp ──►  /home/AidenAI/ops1/staging/opsBinaries.zip     root owns this
+sudo unzip in staging
+```
+
+**SFTP cannot use sudo.** It is a protocol, not a command, so it writes as
+`day6sio` — and `/home/AidenAI/ops1` is root-owned and closed to that account. A
+direct upload fails with EACCES no matter what created the directory. The dated
+CopyData folder also means everything ever uploaded to this server sits in one
+predictable place.
+
 ### 3 · Deploy
 
 One button per part the release contains. They are independent: a UI-only
@@ -210,6 +227,7 @@ Defaults match this server. Override in `.env` only if something moves.
 | `AIDENOPS_OPS_DIR` | `/home/AidenAI/ops1` |
 | `AIDENOPS_VENV` | `/home/AidenAI/ops1/venv` |
 | `AIDENOPS_STAGING_DIR` | `/home/AidenAI/ops1/staging` |
+| upload lands in | `REMOTE_COPYDATA_DIR/<date>/` first — see below |
 | `AIDENOPS_BACKUP_ROOT` | `/home/AidenAI/backups` |
 | `AIDENOPS_WEB_ROOT` | `/var/www/aidenops` |
 | `AIDENOPS_INCOMING_DIR` | `incoming` (relative to the tool) |

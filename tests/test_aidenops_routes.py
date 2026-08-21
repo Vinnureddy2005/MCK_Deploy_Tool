@@ -305,3 +305,42 @@ def test_an_error_page_is_not_accepted_as_an_archive(tmp_path):
     real = tmp_path / "looks-like-one"
     real.write_bytes(b"PK\x03\x04rest")
     assert DownloadService._looks_like_jar(real) is True
+
+
+# --- staging goes via CopyData ---------------------------------------------
+
+
+def test_staging_uploads_where_sftp_can_actually_write():
+    """SFTP cannot use sudo - it is a protocol, not a command - so it can only
+    write somewhere the SSH user owns. Uploading straight into the root-owned
+    ops tree failed with EACCES on the first real run, whatever the mkdir did.
+    """
+    from app.config import copydata_dir
+
+    landing = copydata_dir()
+    assert landing.startswith(config.settings.remote_copydata_dir)
+    assert not landing.startswith("/home/AidenAI")
+
+
+def test_the_root_owned_staging_is_reached_by_a_copy_not_an_upload():
+    """The same two hops the JAR flow makes."""
+    import inspect
+
+    from app.services import aidenops_release
+
+    body = inspect.getsource(aidenops_release.ReleaseStager.stage)
+    assert "copydata_dir()" in body
+    assert '"cp"' in body, "the second hop must be a copy"
+    # and the upload target is the landing directory, never the staging one
+    assert "upload_release(\n            release.local_path, landing" in body
+
+
+def test_the_hash_is_checked_where_the_file_lands():
+    """A transfer that arrived wrong should be caught at the point it arrived,
+    before anything is copied onward."""
+    import inspect
+
+    from app.services import aidenops_release
+
+    body = inspect.getsource(aidenops_release.ReleaseStager.stage)
+    assert body.index("_remote_sha256") < body.index('"cp"')
