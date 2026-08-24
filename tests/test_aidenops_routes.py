@@ -417,3 +417,40 @@ def test_an_unknown_target_is_refused_before_anything_is_started(monkeypatch):
 
     assert response.status_code == 400
     assert calls == [], "nothing should have been started"
+
+
+def test_status_reports_streams_left_running_by_an_earlier_deployment():
+    """So a fresh page can say where unexpected lines came from.
+
+    The streamer is one per process and nothing stopped it, so `journalctl -f`
+    from an earlier deployment is still running when the page is reloaded.
+    """
+    from app.routes import aidenops as route
+
+    class Streamer:
+        streaming = {"journal", "nginx-error"}
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(route, "_streamer", lambda: Streamer())
+    try:
+        body = client.get("/api/aidenops/status").json()
+    finally:
+        monkey.undo()
+
+    assert body["streaming"] == ["journal", "nginx-error"]
+
+
+def test_status_reports_nothing_streaming_when_nothing_is():
+    from app.routes import aidenops as route
+
+    class Streamer:
+        streaming = set()
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(route, "_streamer", lambda: Streamer())
+    try:
+        body = client.get("/api/aidenops/status").json()
+    finally:
+        monkey.undo()
+
+    assert body["streaming"] == []

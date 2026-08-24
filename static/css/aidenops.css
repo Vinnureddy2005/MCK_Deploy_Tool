@@ -604,6 +604,38 @@ body {
   color: var(--ink-faint);
 }
 
+/* ──────────────────────────────────────────── stopping, and finishing ──── */
+
+/* Sits in the console bar beside Clear: small, because stopping the logs is a
+   housekeeping action, not a decision. */
+.btn--tiny {
+  padding: 4px 9px;
+  margin-right: 8px;
+  border: 1px solid var(--line-firm);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn--tiny:hover { border-color: var(--accent); color: var(--accent-deep); }
+.btn--tiny:disabled { opacity: .55; cursor: default; }
+
+/* The way out of the last stage. Separated by a rule because it ends the run
+   rather than continuing it. */
+.finish-row {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-items: flex-start;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
 /* ─────────────────────────────────────────────────────── the error card ──── */
 
 #error-card {

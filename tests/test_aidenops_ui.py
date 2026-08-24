@@ -17,10 +17,17 @@ CSS = (STATIC / "css" / "aidenops.css").read_text(encoding="utf-8")
 
 
 def test_every_element_the_script_reaches_for_exists():
-    wanted = sorted(set(re.findall(r'byId\("([^"]+)"\)', JS)))
+    wanted = set(re.findall(r'byId\("([^"]+)"\)', JS))
     assert wanted, "no byId() calls found - has the script been rewritten?"
-    missing = [i for i in wanted if f'id="{i}"' not in HTML]
-    assert not missing, f"the script looks for ids the page does not define: {missing}"
+
+    # Some elements are built by the script rather than sitting in the markup -
+    # the stop-following button and the finish button only exist once there is
+    # something to stop or finish. Those are looked up to avoid making a second
+    # one, so an id the script assigns counts as defined.
+    built = set(re.findall(r'\.id = "([^"]+)"', JS))
+
+    missing = sorted(i for i in wanted - built if f'id="{i}"' not in HTML)
+    assert not missing, f"the script looks for ids nothing defines: {missing}"
 
 
 def test_no_duplicate_ids():
@@ -103,3 +110,30 @@ def test_the_page_asks_only_for_the_logs_of_what_it_deployed():
     # Backend tab at all.
     assert 'var tab = key === "backend" ? "backend" : "frontend";' in JS
     assert 'push("backend"' not in JS.split("async function startServerLogs")[1]
+
+
+def test_there_is_a_way_out_of_the_last_stage():
+    """Deploying is not the end of the job.
+
+    The last stage previously had no exit but the browser's back button: the
+    release stayed verified, the logs kept following, and the next release had
+    nowhere to start from.
+    """
+    assert "function offerToFinish" in JS
+    assert "offerToFinish();" in JS, "nothing calls it after a deployment"
+
+    finish = JS.split("async function finishUp")[1]
+    assert '"/logs/stop"' in finish, "finishing must stop following the logs"
+    assert '"/clear"' in finish, "finishing must clear the verified release"
+    assert "goto(1)" in finish, "finishing must return to the first stage"
+
+
+def test_the_page_says_when_logs_are_already_running():
+    """The streams belong to the server, not the page.
+
+    They outlive a reload, so lines can arrive with nothing having been clicked.
+    Unlabelled, that reads as a deployment starting on its own.
+    """
+    assert "already following" in JS
+    assert '"/logs/stop"' in JS, "and there must be a way to stop them"
+    assert 'id="stop-logs"' in JS or '.id = "stop-logs"' in JS

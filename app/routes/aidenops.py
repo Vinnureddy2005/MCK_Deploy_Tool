@@ -69,8 +69,16 @@ def _handle(exc: Exception) -> HTTPException:
 async def status() -> dict:
     """What has been verified so far, and what this server expects."""
     release = aidenops_release.current()
+    # The streams are server-side and outlive the page: `journalctl -f` and
+    # `tail -F` from an earlier deployment keep running for the life of the
+    # process, so a fresh page - or a reload, or a second tab - starts receiving
+    # lines without anything having been clicked. Reported here so the page can
+    # say where they came from instead of looking as though it deployed
+    # something on its own.
+    streaming = sorted(_streamer().streaming)
     return {
         "release": release.public() if release else None,
+        "streaming": streaming,
         "dry_run": config.settings.dry_run,
         "server": config.settings.ssh_host,
         "paths": {

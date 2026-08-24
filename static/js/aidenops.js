@@ -67,6 +67,7 @@
     };
 
     var lines = { frontend: [], backend: [] };
+    var streaming = [];
     var unread = { frontend: 0, backend: 0 };
     var hasBad = { frontend: false, backend: false };
     var active = "frontend";
@@ -152,6 +153,47 @@
             renderConsole();
         });
         tabBar.appendChild(clear);
+        renderStopControl();
+    }
+
+    function clearLogs() {
+        TABS.forEach(function (tab) {
+            lines[tab.key] = [];
+            unread[tab.key] = 0;
+            hasBad[tab.key] = false;
+        });
+        active = "frontend";
+        renderTabs();
+        renderConsole();
+    }
+
+    /* Following is read-only, but it holds an SSH channel open and it keeps
+       writing to a tab the operator may be finished with. */
+    function renderStopControl() {
+        var existing = byId("stop-logs");
+        if (!streaming.length) {
+            if (existing) { existing.remove(); }
+            return;
+        }
+        if (existing) { return; }
+
+        var stop = el("button", "btn btn--tiny", "Stop following");
+        stop.type = "button";
+        stop.id = "stop-logs";
+        stop.addEventListener("click", async function () {
+            stop.disabled = true;
+            try {
+                await post("/logs/stop");
+                streaming = [];
+                pushBoth("=== stopped following the server logs ===");
+            } catch (err) {
+                showError(err.message);
+                stop.disabled = false;
+                return;
+            }
+            renderStopControl();
+        });
+        tabBar.appendChild(stop);
     }
 
     function renderConsole() {
@@ -490,6 +532,50 @@
             again.replaceWith(deployButton(key, label));
         });
         done.after(again);
+        offerToFinish();
+    }
+
+    /* There was no way out of the last stage except the browser's back button.
+       Deploying is not the end of the job - the next release needs the flow to
+       start over, and the logs from this one should stop rather than following
+       two deployments at once. */
+    function offerToFinish() {
+        if (byId("finish")) { return; }
+        var box = el("div", "finish-row");
+        box.appendChild(el("p", "hint",
+            "Finishing stops following the server logs and clears this release, "
+            + "ready for the next one."));
+
+        var finish = el("button", "btn btn--go", "Finish and start a new release");
+        finish.type = "button";
+        finish.id = "finish";
+        finish.addEventListener("click", function () { finishUp(finish); });
+        box.appendChild(finish);
+        aftermath.appendChild(box);
+    }
+
+    async function finishUp(button) {
+        button.disabled = true;
+        button.textContent = "Finishing…";
+        /* Neither failure is worth blocking on: the deployment already
+           succeeded, and the worst case is a stale release the operator can
+           re-verify. */
+        try { await post("/logs/stop"); } catch (err) { /* ignore */ }
+        try { await post("/clear"); } catch (err) { /* ignore */ }
+        streaming = [];
+        release = null;
+        deploying = null;
+        outcome.hidden = true;
+        outcome.replaceChildren();
+        aftermath.replaceChildren();
+        targetsHost.replaceChildren();
+        checksList.replaceChildren(el("li", "hint", "Not run yet."));
+        releaseFacts.replaceChildren();
+        codeInput.value = "";
+        clearLogs();
+        renderStopControl();
+        goto(1);
+        await loadFile();
     }
 
     /* A destructive migration or a dependency change cannot be undone by
@@ -561,6 +647,8 @@
         var tab = key === "backend" ? "backend" : "frontend";
         try {
             var body = await post("/logs/start", { target: key });
+            streaming = body.sources || [];
+            renderStopControl();
             push(tab, body.journal
                 ? "=== following " + body.unit + " ==="
                 : "=== following the nginx logs ===", body.journal ? "journal" : "nginx");
@@ -633,6 +721,21 @@
                 pushBoth("Already verified: " + release.archive);
                 goto(2);
             }
+
+            /* Lines can arrive before anything is clicked, because the streams
+               belong to the server and not to this page. Say so, rather than
+               leaving it looking as though a deployment started itself. */
+            streaming = body.streaming || [];
+            if (streaming.length) {
+                streaming.forEach(function (source) {
+                    var route = ROUTES[source];
+                    if (route) {
+                        push(route.tab, "=== already following " + source +
+                             " from an earlier deployment ===", route.tag);
+                    }
+                });
+            }
+            renderStopControl();
         } catch (err) {
             showError(err.message);
         }
