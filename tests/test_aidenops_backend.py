@@ -213,6 +213,65 @@ async def test_an_empty_database_is_treated_as_everything_pending(fast, tmp_path
     assert report["migrations"]["count"] == 2
 
 
+# --- backing up the wheel ---------------------------------------------------
+#
+# pip does not keep the .whl file after installing it, and the previous
+# deploy's own cleanup step wipes its own staged copy once it goes healthy. So
+# there is never an "old" wheel file sitting on the server for a later deploy
+# to scavenge - the only wheel guaranteed to exist at backup time is the one
+# *this* deploy just staged. The backup has to be of that one, taken now,
+# for the accumulated history to mean anything by the next deploy.
+
+
+@pytest.mark.asyncio
+async def test_the_staged_wheel_is_archived_before_install(fast, tmp_path):
+    ssh = RecordingSSH()
+    await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+
+    staged = f"/home/AidenAI/ops1/staging/{WHEEL}"
+    backed_up = f"/home/AidenAI/backups/wheels/{WHEEL}"
+    assert ssh.ran_exact("cp", staged, backed_up)
+
+    # Backed up before the running version is replaced, not after - the whole
+    # point is to have a copy before pip discards what is currently installed.
+    backup_at = ssh.index_of("cp", staged)
+    install_at = ssh.index_of("install", "--force-reinstall")
+    assert -1 < backup_at < install_at
+
+
+@pytest.mark.asyncio
+async def test_the_backup_is_not_taken_from_the_ops_directory(fast, tmp_path):
+    """The bug this replaces: globbing ops1/*.whl, where no wheel is ever
+    written, while the real one sits one level down in ops1/staging."""
+    ssh = RecordingSSH()
+    await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+
+    assert not ssh.ran("cp", "/home/AidenAI/ops1/*.whl")
+
+
+@pytest.mark.asyncio
+async def test_the_reported_previous_version_still_reads_pip_show(fast, tmp_path):
+    """The version string was never the broken part - only the file copy was.
+    `pip show` runs before install, so it names what is about to be replaced."""
+    ssh = RecordingSSH()
+    report = await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+    assert report["previous_version"] == "1.0.9"
+
+
+@pytest.mark.asyncio
+async def test_a_missing_staged_wheel_fails_the_deploy_instead_of_silently_skipping(
+    fast, tmp_path
+):
+    """The old code swallowed this with `2>/dev/null || true` - a backup that
+    silently never happened. Now a missing staged file is a real failure,
+    loud before anything is stopped, not discovered after the fact."""
+    ssh = RecordingSSH(fail_on=(f"cp /home/AidenAI/ops1/staging/{WHEEL}",))
+    with pytest.raises(BackendError) as caught:
+        await _deployer(ssh, fast).deploy(WHEEL, None, _wheel(tmp_path), now=WHEN)
+    assert caught.value.stage == "backup"
+    assert not ssh.ran("systemctl", "stop")
+
+
 # --- confirmation ---------------------------------------------------------
 
 

@@ -162,7 +162,7 @@ class BackendDeployer:
             await self._log("No pending migrations - skipping the database dump")
             report["dump"] = None
 
-        report["previous_version"] = await self._backup(suffix)
+        report["previous_version"] = await self._backup(wheel)
         await self._stop()
 
         if deps["needs_install"]:
@@ -388,8 +388,21 @@ class BackendDeployer:
             f"{margin_kb // 1024} MB margin",
         )
 
-    async def _backup(self, suffix: str) -> str | None:
-        """Keep the wheel being replaced - pip --force-reinstall discards it."""
+    async def _backup(self, wheel: str) -> str | None:
+        """Archive the wheel this deploy is installing, while it still exists.
+
+        Not "the wheel being replaced" - nothing on this server retains that.
+        pip does not keep the .whl file after installing it, and the previous
+        deploy's own _cleanup() already wiped its staged copy once it went
+        healthy. There is no old wheel file left anywhere to grab by the time
+        this runs, whatever directory is searched.
+
+        So this archives the *incoming* wheel instead, at its known staged
+        path, right now while it is guaranteed to exist - the same pattern the
+        UI archive already uses. By the time the *next* deploy runs, this one
+        is what "the previous wheel" means; the history accumulates forward
+        rather than trying to scavenge something already gone.
+        """
         await self._log("Recording the installed version")
         shown = await self._run([self.venv_pip, "show", "aidenops-service"],
                                 stage="backup", check=False)
@@ -399,11 +412,8 @@ class BackendDeployer:
                 version = line.split(":", 1)[1].strip()
 
         wheels = f"{self.settings.aidenops_backup_root}/wheels"
-        await self._run(
-            ["sh", "-c", 'cp "$1"/*.whl "$2"/ 2>/dev/null || true',
-             "sh", self.settings.aidenops_ops_dir, wheels],
-            stage="backup", check=False,
-        )
+        await self._run(["mkdir", "-p", wheels], stage="backup")
+        await self._run(["cp", self._staged(wheel), f"{wheels}/{wheel}"], stage="backup")
         await self._prune(f"{wheels}/*.whl",
                           max(1, self.settings.aidenops_keep_dumps), stage="backup")
         await self._log(f"  replacing version {version or 'unknown'}")
